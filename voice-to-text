@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# Record the microphone and transcribe it with the OpenAI API.
+#
+# Usage:
+#   voice-to-text start            # start recording in the background
+#   voice-to-text stop             # stop, transcribe, print text to stdout
+#   voice-to-text toggle           # start if idle, else stop
+#   voice-to-text status           # prints "recording" or "idle"
+#   voice-to-text transcribe FILE  # transcribe an existing audio file
+#   voice-to-text history [N]      # print the last N transcripts (default 10)
+#   voice-to-text --help
+#
+# Every recording's transcript is appended to the history file
+# (default ~/Library/Application Support/voice-to-text/history.md).
+#
+# API key: Keychain item "openai-api-key" (or OPENAI_API_KEY env).
+#   security add-generic-password -U -a "$USER" -s openai-api-key -w 'sk-...'
+# Env: VTT_MODEL (default gpt-4o-transcribe), VTT_DIR (state dir),
+#      VTT_HISTORY (history file), VTT_MIC (avfoundation audio device,
+#      default ":default"), OPENAI_BASE_URL (default https://api.openai.com/v1).
+
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+MODEL="${VTT_MODEL:-gpt-4o-transcribe}"
+DIR="${VTT_DIR:-$HOME/Library/Caches/voice-to-text}"
+MIC="${VTT_MIC:-:default}"
+BASE_URL="${OPENAI_BASE_URL:-https://api.openai.com/v1}"
+PID_FILE="$DIR/ffmpeg.pid"
+AUDIO="$DIR/recording.m4a"
+LOG="$DIR/ffmpeg.log"
+HISTORY="${VTT_HISTORY:-$HOME/Library/Application Support/voice-to-text/history.md}"
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-0}"
+}
+
+die() { echo "voice-to-text: $*" >&2; exit 1; }
+
+is_recording() {
+  [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null
+}
+
+api_key() {
+  if [ -n "${OPENAI_API_KEY:-}" ]; then echo "$OPENAI_API_KEY"; return; fi
+  security find-generic-password -s openai-api-key -w 2>/dev/null \
+    || die "no API key: set OPENAI_API_KEY or Keychain item 'openai-api-key'"
+}
+
+start() {
+  is_recording && die "already recording"
+  mkdir -p "$DIR"
+  rm -f "$AUDIO"
+  # Mono 16 kHz AAC: small upload, plenty for speech.
+  ffmpeg -nostdin -hide_banner -loglevel error -f avfoundation -i "$MIC" \
+    -ac 1 -ar 16000 -c:a aac -b:a 48k "$AUDIO" >"$LOG" 2>&1 &
+  echo $! > "$PID_FILE"
+  sleep 0.3
+  is_recording || { rm -f "$PID_FILE"; die "ffmpeg failed to start: $(cat "$LOG")"; }
+}
+
+stop_recording() {
+  is_recording || die "not recording"
+  local pid; pid="$(cat "$PID_FILE")"
+  # SIGTERM: ffmpeg finalizes the file. (SIGINT is ignored by background jobs of scripts.)
+  kill -TERM "$pid"
+  for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  rm -f "$PID_FILE"
+  [ -s "$AUDIO" ] || die "empty recording: $(cat "$LOG" 2>/dev/null)"
+}
+
+transcribe() {
+  local file="$1" key resp code body
+  [ -s "$file" ] || die "no audio file: $file"
+  key="$(api_key)"
+  resp="$(curl -sS -w '\n%{http_code}' "$BASE_URL/audio/transcriptions" \
+    -H "Authorization: Bearer $key" \
+    -F model="$MODEL" -F response_format=text -F file=@"$file")" \
+    || die "request failed"
+  code="${resp##*$'\n'}"; body="${resp%$'\n'*}"
+  [ "$code" = "200" ] || die "API error $code: $body"
+  # One line, no surrounding whitespace.
+  printf '%s' "$body" | tr '\n' ' ' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'
+}
+
+save_history() {
+  [ -n "$1" ] || return 0
+  mkdir -p "$(dirname "$HISTORY")"
+  printf '## %s\n\n%s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$HISTORY"
+}
+
+stop() {
+  local text
+  stop_recording
+  text="$(transcribe "$AUDIO")"
+  save_history "$text"
+  printf '%s' "$text"
+}
+
+history() {
+  [ -f "$HISTORY" ] || { echo "no history yet: $HISTORY" >&2; return 0; }
+  # Entries start with "## "; print the last N.
+  awk -v n="${1:-10}" '/^## /{c++} {line[NR]=$0; entry[NR]=c} END{for(i=1;i<=NR;i++) if(entry[i]>c-n) print line[i]}' "$HISTORY"
+}
+
+case "${1:-}" in
+  start) start ;;
+  stop) stop ;;
+  toggle) if is_recording; then stop; else start; fi ;;
+  status) is_recording && echo recording || echo idle ;;
+  transcribe) [ $# -ge 2 ] || usage 1; transcribe "$2" ;;
+  history) history "${2:-10}" ;;
+  -h|--help) usage 0 ;;
+  *) usage 1 ;;
+esac
