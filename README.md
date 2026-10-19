@@ -13,7 +13,8 @@ ctrl+.  →  Hammerspoon (Lua)  →  voice-to-text (bash)  →  ffmpeg (mic → 
 ## Features
 
 - Toggle hotkey: `ctrl+.` to start, `ctrl+.` again to stop.
-- Menu-bar indicator: `● REC` while recording, `…` while transcribing.
+- Menu-bar indicator: `○ REC` while the mic opens (don't talk yet), red `● REC` once it is live, `…` while transcribing.
+- Sound cues: `Tink` when the mic is live, `Pop` when recording stops.
 - Pastes at the cursor; the transcript also stays on the clipboard.
 - Keeps a timestamped history of every transcript.
 - Works with any language the model supports (tested in English and Spanish).
@@ -83,7 +84,9 @@ Hammerspoon is a macOS automation app scripted in Lua. On start it runs
 `~/.hammerspoon/init.lua`, which loads `voice-to-text.lua`. That file:
 
 - Binds the global hotkey: `hs.hotkey.bind({ "ctrl" }, ".", M.toggle)`.
-- Tracks state (`idle` → `recording` → `transcribing`); presses while transcribing are ignored.
+- Tracks state (`idle` → `starting` → `recording` → `transcribing`); presses while starting or transcribing are ignored.
+- `start` returns only once ffmpeg reports encoded audio (`-progress` `out_time_us` > 0), so `● REC` and the start sound mean the mic is live.
+  Opening the mic takes ~0.3 s when warm and several seconds after it has been idle.
 - Runs the bash script asynchronously with `hs.task`, so the UI never freezes.
 - On success: `hs.pasteboard.setContents(text)` then `hs.eventtap.keyStroke({ "cmd" }, "v")`.
 - Shows errors with `hs.alert`.
@@ -120,6 +123,8 @@ curl https://api.openai.com/v1/audio/transcriptions \
 | Setting | Where | Default |
 |---|---|---|
 | Hotkey | `M.hotkey` in `voice-to-text.lua` | `ctrl+.` |
+| Sound cues | `M.sounds` in `voice-to-text.lua` (names from `/System/Library/Sounds`, `false` mutes) | `start = "Tink"`, `stop = "Pop"` |
+| Mic start timeout | `VTT_START_TIMEOUT` env (seconds) | `10` |
 | Model | `VTT_MODEL` env | `gpt-4o-transcribe` (also: `gpt-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`) |
 | Microphone | `VTT_MIC` env | `:default` (list devices: `ffmpeg -f avfoundation -list_devices true -i ""`) |
 | History file | `VTT_HISTORY` env | `~/Library/Application Support/voice-to-text/history.md` |
@@ -154,7 +159,7 @@ Hello, this is a test of the voice-to-text tool.
 ## Tests
 
 ```sh
-bash test.sh          # fake ffmpeg + fake API: state, errors, trimming, history
+bash test.sh          # fake ffmpeg + fake API: state, mic start, errors, trimming, history
 bash test.sh --live   # also transcribes a `say`-generated clip with the real API
 ```
 
@@ -168,6 +173,7 @@ bash test.sh --live   # also transcribes a `say`-generated clip with the real AP
 | "no API key" | `secret set OPENAI_API_KEY -p openai --clip` |
 | "API error 401" | Key invalid or revoked; update it with the command above |
 | Stuck in `● REC` after a crash | `./voice-to-text stop`, or delete `~/Library/Caches/voice-to-text/ffmpeg.pid` |
+| "microphone did not start within 10s" | Mic busy or unplugged; check `VTT_MIC` and `~/Library/Caches/voice-to-text/ffmpeg.log` |
 | Hotkey conflicts with an app | Change `M.hotkey` in `voice-to-text.lua` and reload |
 
 ## Files
@@ -175,7 +181,7 @@ bash test.sh --live   # also transcribes a `say`-generated clip with the real AP
 | File | Purpose |
 |---|---|
 | `voice-to-text` | Bash CLI: record, stop, transcribe, history |
-| `voice-to-text.lua` | Hammerspoon hotkey, menu-bar indicator, paste |
+| `voice-to-text.lua` | Hammerspoon hotkey, menu-bar indicator, sound cues, paste |
 | `install.sh` | One-shot setup |
 | `test.sh` | Tests |
 
