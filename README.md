@@ -33,7 +33,7 @@ cd voice-to-text-macos
 
 1. Installs `ffmpeg` and Hammerspoon with Homebrew if missing.
 2. Adds `dofile("<repo>/voice-to-text.lua")` to `~/.hammerspoon/init.lua`.
-3. Asks for your OpenAI key and stores it in the macOS Keychain as `openai-api-key`.
+3. Asks for your OpenAI key and stores it in the macOS Keychain as `OPENAI_API_KEY` (account `agent-secrets`, shared with the `secret` CLI).
 4. Turns on Hammerspoon's launch at login and reloads its config.
 
 Then grant, in **System Settings → Privacy & Security**:
@@ -49,7 +49,7 @@ Then grant, in **System Settings → Privacy & Security**:
 ```sh
 brew install ffmpeg
 brew install --cask hammerspoon
-security add-generic-password -U -a "$USER" -s openai-api-key -w 'sk-...'
+security add-generic-password -U -a agent-secrets -s OPENAI_API_KEY -w 'sk-...'
 echo 'dofile("'"$PWD"'/voice-to-text.lua")' >> ~/.hammerspoon/init.lua
 ```
 
@@ -111,7 +111,7 @@ curl https://api.openai.com/v1/audio/transcriptions \
   -F model=gpt-4o-transcribe -F response_format=text -F file=@recording.m4a
 ```
 
-- The key is read from Keychain (`security find-generic-password -s openai-api-key -w`),
+- The key is read from Keychain (`security find-generic-password -a agent-secrets -s OPENAI_API_KEY -w`),
   because Hammerspoon does not load your shell profile. `OPENAI_API_KEY` overrides it.
 - The text is collapsed to one line, appended to the history file and printed to stdout.
 
@@ -165,7 +165,7 @@ bash test.sh --live   # also transcribes a `say`-generated clip with the real AP
 | Nothing happens on `ctrl+.` | Hammerspoon not running, or config not loaded: open it → Reload Config |
 | Transcript copied but not pasted | Grant Accessibility to Hammerspoon |
 | "empty recording" | Grant Microphone to Hammerspoon; check `~/Library/Caches/voice-to-text/ffmpeg.log` |
-| "no API key" | `security add-generic-password -U -a "$USER" -s openai-api-key -w 'sk-...'` |
+| "no API key" | `secret set OPENAI_API_KEY -p openai --clip` |
 | "API error 401" | Key invalid or revoked; update it with the command above |
 | Stuck in `● REC` after a crash | `./voice-to-text stop`, or delete `~/Library/Caches/voice-to-text/ffmpeg.pid` |
 | Hotkey conflicts with an app | Change `M.hotkey` in `voice-to-text.lua` and reload |

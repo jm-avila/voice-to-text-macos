@@ -13,8 +13,8 @@
 # Every recording's transcript is appended to the history file
 # (default ~/Library/Application Support/voice-to-text/history.md).
 #
-# API key: Keychain item "openai-api-key" (or OPENAI_API_KEY env).
-#   security add-generic-password -U -a "$USER" -s openai-api-key -w 'sk-...'
+# API key: Keychain item service "OPENAI_API_KEY", account "agent-secrets" (or OPENAI_API_KEY env).
+#   secret set OPENAI_API_KEY -p openai --clip   (or: security add-generic-password -U -a agent-secrets -s OPENAI_API_KEY -w 'sk-...')
 # Env: VTT_MODEL (default gpt-4o-transcribe), VTT_DIR (state dir),
 #      VTT_HISTORY (history file), VTT_MIC (avfoundation audio device,
 #      default ":default"), OPENAI_BASE_URL (default https://api.openai.com/v1).
@@ -44,8 +44,8 @@ is_recording() {
 
 api_key() {
   if [ -n "${OPENAI_API_KEY:-}" ]; then echo "$OPENAI_API_KEY"; return; fi
-  security find-generic-password -s openai-api-key -w 2>/dev/null \
-    || die "no API key: set OPENAI_API_KEY or Keychain item 'openai-api-key'"
+  security find-generic-password -a agent-secrets -s OPENAI_API_KEY -w 2>/dev/null \
+    || die "no API key: set OPENAI_API_KEY or run: secret set OPENAI_API_KEY -p openai --clip"
 }
 
 start() {
