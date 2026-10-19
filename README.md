@@ -184,6 +184,7 @@ bash test.sh --live   # also transcribes a `say`-generated clip with the real AP
 | `voice-to-text.lua` | Hammerspoon hotkey, menu-bar indicator, sound cues, paste |
 | `install.sh` | One-shot setup |
 | `test.sh` | Tests |
+| `SPEC.md` | Full specification: architecture, interfaces, design decisions, known gaps |
 
 ## License
 
