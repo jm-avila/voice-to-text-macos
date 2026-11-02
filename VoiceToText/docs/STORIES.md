@@ -71,3 +71,12 @@ Acceptance:
 - [self] Cancel while recording throws the audio away without transcribing.
 - [self] Cancel while the mic opens stops it as soon as it is open.
 Status: done
+
+### S-010 Dictate with a local model
+As the user, I pick Whisper large-v3-turbo in Settings and dictate with no key and no network.
+Acceptance:
+- [unit] Picking "Whisper large-v3-turbo (on this Mac)" sends recordings to whisper-cli; every other model goes to OpenAI.
+- [unit] Missing whisper.cpp or model files fail with how to fix them.
+- [e2e] English and Spanish (detected) come back right; 2 s of silence comes back empty, not "Thank you.".
+- [e2e] `vtt status` reports `localModel: ready` after `tools/get-model.sh`.
+Status: done

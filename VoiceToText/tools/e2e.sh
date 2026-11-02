@@ -6,6 +6,7 @@
 # file written in the bash tool's format, changes settings, calls the MCP
 # server, kills and relaunches it.
 # Costs a few cents' fraction: two short transcriptions with your OpenAI key.
+# Also transcribes with the local model (tools/get-model.sh first).
 # Usage: tools/e2e.sh          (after ./build.sh)
 #        tools/e2e.sh --mic    also record 3 s from the real microphone
 #                              (macOS asks for mic access the first time)
@@ -64,6 +65,19 @@ say -v Mónica -o "$work/hola.aiff" "Mañana compramos pan y leche en el mercado
 afconvert -f m4af -d aac "$work/hola.aiff" "$work/hola.m4a"
 es=$("$cli" transcribe "$work/hola.m4a" --json)
 has "$(json "$es" "d['text']")" "mercado" && pass "S-007 Spanish with the mini model: \"$(json "$es" "d['text']")\"" || fail "S-007 Spanish ($es)"
+
+# S-010 The local model: no key, no network. Needs tools/get-model.sh first.
+[[ $(json "$st" "d['localModel']") == ready ]] && pass "S-010 status: the local model is ready" || fail "S-010 local model not ready ($st); run tools/get-model.sh"
+"$cli" settings update --model whisper-large-v3-turbo-local --language auto --json >/dev/null
+lo=$("$cli" transcribe "$work/hello.m4a" --json)
+has "$(json "$lo" "d['text']")" "quarterly report" && pass "S-010 local model, English: \"$(json "$lo" "d['text']")\"" || fail "S-010 local English ($lo)"
+lo=$("$cli" transcribe "$work/hola.m4a" --json)
+has "$(json "$lo" "d['text']")" "mercado" && pass "S-010 local model, Spanish detected: \"$(json "$lo" "d['text']")\"" || fail "S-010 local Spanish ($lo)"
+say -o "$work/quiet.aiff" "[[slnc 2000]]"
+afconvert -f m4af -d aac "$work/quiet.aiff" "$work/quiet.m4a"
+lo=$("$cli" transcribe "$work/quiet.m4a" --json)
+[[ -z $(json "$lo" "d['text']") ]] && pass "S-010 local model hears nothing in silence (no \"Thank you.\")" || fail "S-010 silence ($lo)"
+"$cli" settings update --language es --model gpt-4o-mini-transcribe --json >/dev/null
 
 # MCP: one tool call over stdin and stdout.
 mcp=$(printf '%s\n' \

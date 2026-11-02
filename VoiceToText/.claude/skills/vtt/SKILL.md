@@ -1,6 +1,6 @@
 ---
 name: vtt
-description: Drive the VoiceToText dictation app on this Mac from the shell with the `vtt` command. Transcribe an audio file with OpenAI, record from the microphone and get the text back, read the user's past dictations, or change the model and language. Use when the user asks to transcribe audio, wants to know what they dictated, asks you to listen or take a voice note, or names VoiceToText or vtt.
+description: Drive the VoiceToText dictation app on this Mac from the shell with the `vtt` command. Transcribe an audio file (OpenAI or the local Whisper model), record from the microphone and get the text back, read the user's past dictations, or change the model and language. Use when the user asks to transcribe audio, wants to know what they dictated, asks you to listen or take a voice note, or names VoiceToText or vtt.
 ---
 
 # vtt
@@ -12,7 +12,7 @@ If the app is closed, the command opens it in the background.
 
 - Always add `--json` and read the JSON. Exit 0 means ok. Otherwise read `error.code` and `error.message`, and do what
   the message says (exit 2 usage, 3 not found, 4 app not running).
-- `transcribe` sends the file to OpenAI and costs a little. Use it on files the user pointed you to.
+- `transcribe` with an OpenAI model sends the file to OpenAI and costs a little; the local model is free and offline. Use it on files the user pointed you to.
 - `start` records the user's microphone. Only start it when the user asks you to listen. Tell them when it is
   live, and always `stop` or `cancel` it.
 - History holds what the user said out loud. Quote only what the task needs.
@@ -31,5 +31,5 @@ If the app is closed, the command opens it in the background.
 | `vtt history list --limit N --json` | Past transcripts, newest first: `{"entries": [{date, text}], "total", "file"}` |
 | `vtt settings update [--model M] [--language es\|auto] [--sounds true\|false] --json` | Only the options given change |
 
-Models: `gpt-4o-transcribe` (default), `gpt-4o-mini-transcribe`, `whisper-1`.
+Models: `gpt-4o-transcribe` (default), `gpt-4o-mini-transcribe`, `whisper-1` (OpenAI), and `whisper-large-v3-turbo-local` (whisper.cpp on this Mac; `localModel` in status says whether it is ready).
 Everything else: `vtt help`, and `vtt help <command>` for its options.

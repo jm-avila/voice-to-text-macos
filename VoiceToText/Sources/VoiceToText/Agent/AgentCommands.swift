@@ -102,6 +102,7 @@ extension Services {
             "history": dictation.history.count,
             "historyFile": store.historyURL.path,
             "canRetry": dictation.canRetry,
+            "localModel": LocalWhisper.status.rawValue,
         ]
         if case .recording = dictation.state { status["recordingSeconds"] = (dictation.elapsed * 10).rounded() / 10 }
         if let error = dictation.lastError { status["lastError"] = error }

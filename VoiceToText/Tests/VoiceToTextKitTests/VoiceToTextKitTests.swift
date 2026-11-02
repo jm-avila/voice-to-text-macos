@@ -224,3 +224,63 @@ struct Settings {
         #expect(DictationSettings.decode(nil) == DictationSettings())
     }
 }
+
+@Suite("S-010 Dictate with the local model")
+struct LocalModel {
+    @Test("whisper-cli prints only the text, with the voice detector, in the chosen language", arguments: [
+        (String?.none, "auto"), ("", "auto"), ("es", "es"),
+    ])
+    func arguments(language: String?, expected: String) {
+        let args = LocalWhisper.arguments(model: URL(fileURLWithPath: "/m.bin"), vad: URL(fileURLWithPath: "/v.bin"),
+                                          wav: URL(fileURLWithPath: "/a.wav"), language: language)
+        #expect(args == ["-m", "/m.bin", "--vad", "-vm", "/v.bin", "-f", "/a.wav", "-l", expected, "-nt", "-np"])
+    }
+
+    @Test("Whisper's noise markers are dropped; text stays one line", arguments: [
+        ("\n The quick brown fox.\n", "The quick brown fox."),
+        ("[BLANK_AUDIO]", ""),
+        (" (music) Hola, ¿qué tal?\n [BLANK_AUDIO]\n", "Hola, ¿qué tal?"),
+        ("First. [ Silence ] Second.", "First. Second."),
+    ])
+    func clean(raw: String, expected: String) {
+        #expect(LocalWhisper.clean(raw) == expected)
+    }
+
+    @Test("The local model goes to whisper-cli, every other model to OpenAI")
+    func routing() async throws {
+        let router = RoutingTranscriber(openAI: Echo(name: "openai"), local: Echo(name: "local"))
+        let file = URL(fileURLWithPath: "/a.m4a")
+        #expect(try await router.transcribe(file, model: LocalWhisper.model, language: nil) == "local")
+        for model in DictationSettings.models where model != LocalWhisper.model {
+            #expect(try await router.transcribe(file, model: model, language: nil) == "openai")
+        }
+    }
+
+    @Test("Settings offers it by name")
+    func offered() {
+        #expect(DictationSettings.models.contains(LocalWhisper.model))
+        #expect(DictationSettings.modelName(LocalWhisper.model) == "Whisper large-v3-turbo (on this Mac)")
+        #expect(DictationSettings.modelName("gpt-4o-transcribe") == "OpenAI gpt-4o-transcribe")
+    }
+
+    @Test("Missing whisper.cpp or model says how to fix it")
+    func missing() async throws {
+        let none = URL(fileURLWithPath: "/nonexistent/x.bin")
+        let audio = FileManager.default.temporaryDirectory.appending(path: "vtt-test-\(UUID()).m4a")
+        try Data("x".utf8).write(to: audio)
+        defer { try? FileManager.default.removeItem(at: audio) }
+        await #expect(throws: TranscriptionError.noWhisperCLI) {
+            try await LocalWhisperTranscriber(modelURL: none, vadURL: none, cli: { nil }).transcribe(audio, model: "", language: nil)
+        }
+        await #expect(throws: TranscriptionError.noLocalModel) {
+            try await LocalWhisperTranscriber(modelURL: none, vadURL: none, cli: { URL(fileURLWithPath: "/usr/bin/true") })
+                .transcribe(audio, model: "", language: nil)
+        }
+        #expect(TranscriptionError.noLocalModel.errorDescription?.contains("get-model.sh") == true)
+    }
+}
+
+private struct Echo: Transcribing {
+    let name: String
+    func transcribe(_ file: URL, model: String, language: String?) async throws -> String { name }
+}

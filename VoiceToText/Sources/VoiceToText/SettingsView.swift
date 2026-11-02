@@ -87,7 +87,7 @@ struct SettingsView: View {
                     }
                 }
                 Picker("Model", selection: $dictation.settings.model) {
-                    ForEach(DictationSettings.models, id: \.self) { Text($0).tag($0) }
+                    ForEach(DictationSettings.models, id: \.self) { Text(DictationSettings.modelName($0)).tag($0) }
                 }
                 Picker("Language", selection: $dictation.settings.language) {
                     ForEach(DictationSettings.languages, id: \.self) { Text(Self.languageName($0)).tag($0) }
@@ -112,6 +112,13 @@ struct SettingsView: View {
                     case false?: Status(ok: false, text: "Missing")
                     }
                 }
+                LabeledContent("Local model") {
+                    switch LocalWhisper.status {
+                    case .ready: Status(ok: true, text: "Downloaded")
+                    case .noModel: Status(ok: false, text: "Not downloaded")
+                    case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
+                    }
+                }
                 LabeledContent("Microphone") {
                     switch permissions.microphone {
                     case .granted: Status(ok: true, text: "Allowed")
@@ -131,6 +138,10 @@ struct SettingsView: View {
             } footer: {
                 Text(keyFound == false
                      ? "Add your key: secret set OPENAI_API_KEY -p openai --clip"
+                     : LocalWhisper.status == .noCLI
+                     ? "For the local model: brew install whisper-cpp"
+                     : LocalWhisper.status == .noModel
+                     ? "For the local model, run VoiceToText/tools/get-model.sh (1.6 GB)."
                      : "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself.")
                     .foregroundStyle(.secondary)
             }
