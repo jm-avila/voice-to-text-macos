@@ -1,0 +1,12 @@
+$ claude -p "I left a voice memo at /tmp/vtt-demo/memo.m4a. What are the tasks in it? Also tell me which transcription model and language the dictation app is set to." --model sonnet --allowedTools "Bash(vtt:*)" Read
+(APP_STORE=/tmp/vtt-test.store; the memo was made with `say`)
+
+**Tasks in the memo:**
+1. Call the dentist on Tuesday.
+2. Buy printer ink.
+
+**Dictation app settings:**
+- Model: `gpt-4o-transcribe`
+- Language: `auto`
+
+`vtt status` reported its history file as `/tmp/vtt-test.store/history.md`. That means this `vtt` call used a test store, not your real one. The settings above may not match your real app. I can check against the real store if you want.

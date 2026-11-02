@@ -1,0 +1,73 @@
+# Stories
+
+Checks: [unit] `tools/test.sh .`, [self] `tools/selftest.sh`, [e2e] `tools/e2e.sh`, [snap] `tools/snap.sh`, [manual] by hand.
+
+### S-001 Dictate into any app
+As the user, I press ⌃., speak, press ⌃. again, and the text is pasted at my cursor.
+Acceptance:
+- [self] The second press transcribes and pastes; the HUD says Pasted, then hides.
+- [self] The model and language from Settings go to OpenAI.
+- [e2e] A spoken English file comes back as the same sentence from the real API.
+- [manual] With the real mic and hotkey, the text lands in the app that was in front.
+Status: done (manual check pending)
+
+### S-002 See what it is doing
+As the user, I can tell whether the mic is opening, live, or transcribing.
+Screens: hud-starting, hud-recording, hud-transcribing
+Acceptance:
+- [self] Starting: dimmed mic in the menu bar, HUD "Opening the mic… wait". Live: red mic, Tink, level meter and timer. Transcribing: ellipsis, Pop.
+- [self] The HUD never takes focus or clicks.
+- [snap] Each state in light and dark.
+Status: done
+
+### S-003 Presses that make no sense are ignored
+Acceptance:
+- [self] A press while the mic opens or while transcribing does nothing.
+- [self] A recording under 0.3 s is not sent.
+Status: done
+
+### S-004 Paste or copy
+Acceptance:
+- [self] The text stays on the clipboard after the paste.
+- [self] Without Accessibility the text is only copied; the HUD says "Copied. Press ⌘V to paste".
+- [self] Nothing heard: no paste, no history entry, HUD says so.
+Status: done
+
+### S-005 History
+Acceptance:
+- [self] Every transcript is appended to history.md in the bash tool's format.
+- [self] Entries the bash tool appends show in the menu without a restart.
+- [self] A history.md that cannot be written is never replaced; the error shows.
+- [e2e] `vtt history list` reads a file the bash tool wrote.
+- [manual] Recent in the menu copies an older transcript.
+Status: done
+
+### S-006 Errors and retry
+Acceptance:
+- [self] An API error shows in the HUD for 4 s; the recording is kept and Retry sends it again.
+- [self] A mic that sends no audio within 10 s shows an error and goes back to ready.
+- [self] After a new start, the old recording is no longer offered for retry.
+- [snap] hud-error with a long API message.
+Status: done
+
+### S-007 Settings
+Screens: settings
+Acceptance:
+- [self] Model, language, and sounds are saved to settings.json and used.
+- [e2e] `vtt settings update` refuses an unknown model; Spanish with the mini model works; settings survive a restart.
+- [snap] Settings shows every row without scrolling.
+- [manual] Open at Login; Microphone and Accessibility buttons open the right panes.
+Status: done
+
+### S-008 Agents
+Acceptance:
+- [self] status, start, stop, toggle, cancel, transcribe, history list, settings update through the router.
+- [e2e] The CLI starts a test copy; MCP tools/call works; a client that hangs up does not kill the app; a second copy quits.
+- [e2e] BAMA's CLI checker passes.
+Status: done
+
+### S-009 Cancel
+Acceptance:
+- [self] Cancel while recording throws the audio away without transcribing.
+- [self] Cancel while the mic opens stops it as soon as it is open.
+Status: done

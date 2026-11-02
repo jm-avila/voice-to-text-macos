@@ -8,7 +8,7 @@
 # Steps:
 #   1. brew install ffmpeg + Hammerspoon (if missing)
 #   2. add a dofile() line to ~/.hammerspoon/init.lua (once)
-#   3. store your OpenAI API key in Keychain as "openai-api-key" (if missing)
+#   3. store your OpenAI API key in Keychain as OPENAI_API_KEY / agent-secrets (if missing)
 #   4. enable Hammerspoon launch at login and reload it
 
 set -euo pipefail
@@ -37,11 +37,15 @@ else
 fi
 echo "Hammerspoon config: $INIT"
 
-if ! security find-generic-password -s openai-api-key >/dev/null 2>&1; then
+if ! security find-generic-password -a agent-secrets -s OPENAI_API_KEY >/dev/null 2>&1; then
   read -rsp "OpenAI API key (sk-...): " key; echo
   [ -n "$key" ] || { echo "no key entered" >&2; exit 1; }
-  security add-generic-password -U -a "$USER" -s openai-api-key -w "$key"
-  echo "API key stored in Keychain as 'openai-api-key'"
+  if command -v secret >/dev/null; then
+    printf '%s' "$key" | secret set OPENAI_API_KEY -p openai -d "OpenAI key"
+  else
+    security add-generic-password -U -a agent-secrets -s OPENAI_API_KEY -w "$key"
+  fi
+  echo "API key stored in Keychain as OPENAI_API_KEY (account agent-secrets)"
 fi
 
 chmod +x "$HERE/voice-to-text"
