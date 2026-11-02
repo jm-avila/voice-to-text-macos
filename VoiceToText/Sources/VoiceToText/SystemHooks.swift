@@ -3,6 +3,7 @@ import ApplicationServices
 import AVFoundation
 import Carbon.HIToolbox
 import Observation
+import VoiceToTextKit
 
 /// Posts Command-V to the front app. Needs Accessibility. The marker lets
 /// other tools tell this event from a real key press.
@@ -21,7 +22,7 @@ enum SyntheticEvents {
     }
 }
 
-/// Accessibility (to paste) and the microphone, checked every second so
+/// Accessibility (to paste), the microphone, and the local model, checked every second so
 /// Settings updates within 2 s of a change, without a restart.
 @Observable
 final class Permissions {
@@ -31,6 +32,8 @@ final class Permissions {
 
     private(set) var accessibility = AXIsProcessTrusted()
     private(set) var microphone = Permissions.readMicrophone()
+    /// Polled too, so Settings shows "Downloaded" once tools/get-model.sh finishes.
+    private(set) var localModel = LocalWhisper.status
     @ObservationIgnored private var timer: Timer?
 
     func startPolling() {
@@ -47,6 +50,8 @@ final class Permissions {
         if trusted != accessibility { accessibility = trusted }
         let mic = Self.readMicrophone()
         if mic != microphone { microphone = mic }
+        let local = LocalWhisper.status
+        if local != localModel { localModel = local }
     }
 
     /// Asks for the microphone the first time; true when it may record.

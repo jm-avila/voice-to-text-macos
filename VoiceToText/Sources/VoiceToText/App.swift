@@ -33,10 +33,11 @@ final class Services {
         }
     }
 
-    /// The real microphone, OpenAI, and the clipboard.
+    /// The real microphone, OpenAI or the local model, and the clipboard.
     static func live() -> Services {
         let base = ProcessInfo.processInfo.environment["OPENAI_BASE_URL"].flatMap(URL.init(string:))
-        let transcriber = OpenAITranscriber(baseURL: base ?? URL(string: "https://api.openai.com/v1")!) { APIKey.read() }
+        let openAI = OpenAITranscriber(baseURL: base ?? URL(string: "https://api.openai.com/v1")!) { APIKey.read() }
+        let transcriber = RoutingTranscriber(openAI: openAI, local: LocalWhisperTranscriber())
         return Services(recorder: MicRecorder(), transcriber: transcriber, pasteboard: .general)
     }
 

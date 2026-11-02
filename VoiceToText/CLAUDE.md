@@ -1,7 +1,7 @@
 # VoiceToText
 
 A native macOS menu bar app in Swift and SwiftUI: press ⌃. to record, ⌃. again to
-transcribe with OpenAI and paste at the cursor. It replaces the Hammerspoon + bash
+transcribe with OpenAI or a local Whisper model and paste at the cursor. It replaces the Hammerspoon + bash
 version one folder up (`../SPEC.md`) and shares its files.
 
 ## Layout
@@ -12,17 +12,18 @@ version one folder up (`../SPEC.md`) and shares its files.
   - `StatusItem.swift` the menu bar icon and menu, `HUD.swift` the floating pill, `SettingsView.swift` the one Settings window.
   - `App.swift` wires `Services` (live, or `testing()` with the fakes in `Fakes.swift`).
   - `Agent/` the `vtt` CLI, its socket, and the MCP server. Commands live in `Agent/AgentCommands.swift`.
-- `Sources/VoiceToTextKit/` logic with no AppKit: transcript cleanup, `history.md` format, the OpenAI request, settings. Tests in `Tests/VoiceToTextKitTests/`.
+- `Sources/VoiceToTextKit/` logic with no AppKit: transcript cleanup, `history.md` format, the OpenAI request, the local whisper-cli transcriber (`LocalWhisper.swift`), settings. Tests in `Tests/VoiceToTextKitTests/`.
 - `Package.swift` a Swift package. There is no Xcode project.
 - `build.sh` builds, signs (ad hoc), installs `~/Applications/VoiceToText.app`, and links `~/.local/bin/vtt`.
 - `tools/draw_icon.swift` the icon, drawn in code. `build.sh` turns it into `Resources/AppIcon.icns`.
-- `docs/` the brief and the user stories (S-001…S-009).
+- `docs/` the brief and the user stories (S-001…S-010).
 
 ## Files
 
 - Store: `~/Library/Application Support/voice-to-text/` (the bash tool's folder): `history.md`, `settings.json`, `last-recording.m4a`.
 - `history.md` keeps the bash tool's format (`## yyyy-MM-dd HH:mm:ss`, blank line, text). Both tools read and append it.
 - The OpenAI key: env `OPENAI_API_KEY`, else Keychain through `/usr/bin/security` (account `agent-secrets`, service `OPENAI_API_KEY`).
+- The local model: `models/ggml-large-v3-turbo.bin` and `models/ggml-silero-v5.1.2.bin` in the real store, even with `APP_STORE` (one 1.6 GB copy). `tools/get-model.sh` gets them and whisper.cpp.
 - `APP_STORE=<folder>` moves the store. A copy started with it never takes the ⌃. shortcut.
 
 ## Build and check

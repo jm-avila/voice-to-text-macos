@@ -13,6 +13,9 @@ public enum TranscriptionError: LocalizedError, Equatable {
     case tooLarge(bytes: Int)
     case api(status: Int, message: String)
     case network(String)
+    case noWhisperCLI
+    case noLocalModel
+    case local(String)
 
     public var errorDescription: String? {
         switch self {
@@ -26,6 +29,12 @@ public enum TranscriptionError: LocalizedError, Equatable {
             "API error \(status): \(message)"
         case .network(let message):
             "Request failed: \(message)"
+        case .noWhisperCLI:
+            "The local model needs whisper.cpp: brew install whisper-cpp"
+        case .noLocalModel:
+            "The local model is not downloaded. Run VoiceToText/tools/get-model.sh"
+        case .local(let message):
+            message
         }
     }
 }

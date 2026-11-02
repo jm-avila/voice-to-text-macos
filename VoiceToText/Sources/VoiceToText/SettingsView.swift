@@ -87,7 +87,7 @@ struct SettingsView: View {
                     }
                 }
                 Picker("Model", selection: $dictation.settings.model) {
-                    ForEach(DictationSettings.models, id: \.self) { Text($0).tag($0) }
+                    ForEach(DictationSettings.models, id: \.self) { Text(DictationSettings.modelName($0)).tag($0) }
                 }
                 Picker("Language", selection: $dictation.settings.language) {
                     ForEach(DictationSettings.languages, id: \.self) { Text(Self.languageName($0)).tag($0) }
@@ -112,6 +112,13 @@ struct SettingsView: View {
                     case false?: Status(ok: false, text: "Missing")
                     }
                 }
+                LabeledContent("Local model") {
+                    switch permissions.localModel {
+                    case .ready: Status(ok: true, text: "Downloaded")
+                    case .noModel: Status(ok: false, text: "Not downloaded")
+                    case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
+                    }
+                }
                 LabeledContent("Microphone") {
                     switch permissions.microphone {
                     case .granted: Status(ok: true, text: "Allowed")
@@ -129,9 +136,7 @@ struct SettingsView: View {
             } header: {
                 Text("Access")
             } footer: {
-                Text(keyFound == false
-                     ? "Add your key: secret set OPENAI_API_KEY -p openai --clip"
-                     : "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself.")
+                Text(footer)
                     .foregroundStyle(.secondary)
             }
 
@@ -151,6 +156,16 @@ struct SettingsView: View {
         .fitsContent(max: 760)
         .frame(width: 480)
         .task { keyFound = await Task.detached { APIKey.read() != nil }.value }
+    }
+
+    /// The one hint that matters most for the model in use.
+    private var footer: String {
+        let local = dictation.settings.model == LocalWhisper.model
+        if local, permissions.localModel != .ready {
+            return "For the local model, run VoiceToText/tools/get-model.sh (whisper.cpp and 1.6 GB of model)."
+        }
+        if !local, keyFound == false { return "Add your key: secret set OPENAI_API_KEY -p openai --clip" }
+        return "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself."
     }
 
     static func languageName(_ code: String) -> String {

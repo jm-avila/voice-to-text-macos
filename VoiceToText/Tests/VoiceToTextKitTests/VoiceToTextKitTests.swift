@@ -224,3 +224,85 @@ struct Settings {
         #expect(DictationSettings.decode(nil) == DictationSettings())
     }
 }
+
+@Suite("S-010 Dictate with the local model")
+struct LocalModel {
+    @Test("whisper-cli prints only the segments, with the voice detector, in the chosen language", arguments: [
+        (String?.none, "auto"), ("", "auto"), ("es", "es"),
+    ])
+    func arguments(language: String?, expected: String) {
+        let args = LocalWhisper.arguments(model: URL(fileURLWithPath: "/m.bin"), vad: URL(fileURLWithPath: "/v.bin"),
+                                          wav: URL(fileURLWithPath: "/a.wav"), language: language)
+        #expect(args == ["-m", "/m.bin", "--vad", "-vm", "/v.bin", "-f", "/a.wav", "-l", expected, "-np"])
+    }
+
+    @Test("Segments that are only a noise tag are dropped; spoken parentheses stay", arguments: [
+        ("\n[00:00:00.070 --> 00:00:05.650]   The quick brown fox.\n", "The quick brown fox."),
+        ("\n[00:00:00.000 --> 00:00:02.000]   [BLANK_AUDIO]\n", ""),
+        ("[00:00:00.000 --> 00:00:01.000]   (music)\n[00:00:01.000 --> 00:00:03.000]   Hola, ¿qué tal?\n[00:00:03.000 --> 00:00:05.000]   [BLANK_AUDIO]\n",
+         "Hola, ¿qué tal?"),
+        ("[00:00:00.000 --> 00:00:01.000]   *laughs*\n[00:00:01.000 --> 00:00:02.000]   OK, first.\n[00:00:02.000 --> 00:00:03.000]   Second.",
+         "OK, first. Second."),
+        ("[00:00:00.000 --> 00:00:04.000]   The API (application programming interface) is down.",
+         "The API (application programming interface) is down."),
+    ])
+    func clean(raw: String, expected: String) {
+        #expect(LocalWhisper.clean(raw) == expected)
+    }
+
+    @Test("The local model goes to whisper-cli, every other model to OpenAI")
+    func routing() async throws {
+        let router = RoutingTranscriber(openAI: Echo(name: "openai"), local: Echo(name: "local"))
+        let file = URL(fileURLWithPath: "/a.m4a")
+        #expect(try await router.transcribe(file, model: LocalWhisper.model, language: nil) == "local")
+        for model in DictationSettings.models where model != LocalWhisper.model {
+            #expect(try await router.transcribe(file, model: model, language: nil) == "openai")
+        }
+    }
+
+    @Test("Settings offers it by name")
+    func offered() {
+        #expect(DictationSettings.models.contains(LocalWhisper.model))
+        #expect(DictationSettings.modelName(LocalWhisper.model) == "Whisper large-v3-turbo (on this Mac)")
+        #expect(DictationSettings.modelName("gpt-4o-transcribe") == "OpenAI gpt-4o-transcribe")
+    }
+
+    @Test("Missing whisper.cpp or model says how to fix it")
+    func missing() async throws {
+        let none = URL(fileURLWithPath: "/nonexistent/x.bin")
+        let audio = FileManager.default.temporaryDirectory.appending(path: "vtt-test-\(UUID()).m4a")
+        try Data("x".utf8).write(to: audio)
+        defer { try? FileManager.default.removeItem(at: audio) }
+        await #expect(throws: TranscriptionError.noWhisperCLI) {
+            try await LocalWhisperTranscriber(modelURL: none, vadURL: none, cli: { nil }).transcribe(audio, model: "", language: nil)
+        }
+        await #expect(throws: TranscriptionError.noLocalModel) {
+            try await LocalWhisperTranscriber(modelURL: none, vadURL: none, cli: { URL(fileURLWithPath: "/usr/bin/true") })
+                .transcribe(audio, model: "", language: nil)
+        }
+        #expect(TranscriptionError.noLocalModel.errorDescription?.contains("get-model.sh") == true)
+    }
+}
+
+private struct Echo: Transcribing {
+    let name: String
+    func transcribe(_ file: URL, model: String, language: String?) async throws -> String { name }
+}
+
+@Suite("S-010 whisper-cli errors reach the person")
+struct LocalErrors {
+    @Test("An error printed with exit 0 (unknown language) is thrown, not read as silence")
+    func errorWithExitZero() async throws {
+        await #expect(throws: TranscriptionError.local("sh failed: error: unknown language 'zz'")) {
+            try await LocalWhisperTranscriber.run(URL(fileURLWithPath: "/bin/sh"),
+                                                  ["-c", "echo \"whisper_lang_id: unknown language 'zz'\" >&2; echo \"error: unknown language 'zz'\" >&2"])
+        }
+    }
+
+    @Test("A tool that writes a lot to both pipes does not hang")
+    func bothPipes() async throws {
+        let out = try await LocalWhisperTranscriber.run(URL(fileURLWithPath: "/bin/sh"),
+                                                        ["-c", "head -c 200000 /dev/zero | tr '\\0' x >&2; echo done"])
+        #expect(out == "done\n")
+    }
+}

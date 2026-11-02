@@ -12,7 +12,7 @@ same history.
 | --- | --- |
 | Menu bar | A waveform when ready, a dimmed mic while the mic opens (don't talk yet), a red mic while recording, an ellipsis while transcribing. Click it for Start/Stop, Retry, the last 5 transcripts (click to copy), Open History, and Settings (⌘,). |
 | Bottom of the screen | A small glass pill while dictating, showing a level meter and the time, then "Pasted", "Copied", or the error. It never takes focus. |
-| Settings | Shortcut, model, language, sounds, Open at Login, and whether the OpenAI key, the microphone, and Accessibility are set up. |
+| Settings | Shortcut, model, language, sounds, Open at Login, and whether the OpenAI key, the local model, the microphone, and Accessibility are set up. |
 
 ## Install
 
@@ -24,6 +24,18 @@ open ~/Applications/VoiceToText.app
 
 Needs macOS 26 and the Command Line Tools (no Xcode). The key is the bash tool's: Keychain `OPENAI_API_KEY`
 (account `agent-secrets`), or `OPENAI_API_KEY` in the environment.
+
+### Local model (optional)
+
+Whisper large-v3-turbo through whisper.cpp, on this Mac: no key, no network, no cost.
+
+```sh
+tools/get-model.sh    # brew install whisper-cpp if missing, downloads the model (1.6 GB) and the Silero voice detector (1 MB)
+```
+
+Then pick "Whisper large-v3-turbo (on this Mac)" under Model in Settings, or `vtt settings update --model
+whisper-large-v3-turbo-local`. A 4 s clip takes about 1.5 s on an M-series Mac, model load included. The voice detector
+stops Whisper from hearing "Thank you." in silence. Settings shows "Downloaded" once both files are in place.
 
 ### Switch from the Hammerspoon version
 
@@ -56,9 +68,9 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 app not running. The skill fo
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Unit tests | `tools/test.sh .` | 17 tests (transcript cleanup, history format, request, settings) pass |
+| Unit tests | `tools/test.sh .` | 24 tests (transcript cleanup, history format, request, settings, local model) pass |
 | Self-test | `tools/selftest.sh` | 51 checks pass, with a fake mic and transcriber |
-| End to end | `tools/e2e.sh` | 16 checks pass against the real API: `say` clips in English and Spanish, CLI, MCP, restart |
+| End to end | `tools/e2e.sh` | 20 checks pass against the real API and the local model: `say` clips in English and Spanish, silence, CLI, MCP, restart |
 | Agent CLI | BAMA's `check-agent-cli.sh` | PASS |
 | Snapshots | `tools/snap.sh` | 6 HUD states and Settings, light and dark, judged by eye |
 | Grid | `tools/grid-lint.sh`, `tools/check-layout.swift` | PASS |
