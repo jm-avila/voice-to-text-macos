@@ -51,6 +51,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
+        dictation.reloadHistory()
         let shortcut = hotkeys.combo.symbols
         menu.addItem(.sectionHeader(title: headline))
         switch dictation.state {

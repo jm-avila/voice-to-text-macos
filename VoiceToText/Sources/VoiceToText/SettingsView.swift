@@ -17,6 +17,7 @@ final class SettingsWindow {
     var isVisible: Bool { window?.isVisible == true }
 
     func show() {
+        services().dictation.reloadHistory()
         let window = self.window ?? make()
         if !window.isVisible { window.center() }
         // A menu bar app is never active on its own; bring the window to the front.

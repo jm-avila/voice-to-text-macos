@@ -10,7 +10,9 @@ import Foundation
 enum AgentCLI {
     /// nil when the app should open normally.
     static func runIfRequested() -> Int32? {
-        let words = Array(CommandLine.arguments.dropFirst())
+        var words = Array(CommandLine.arguments.dropFirst())
+        // `vtt` alone, from a terminal, would run the app inside the terminal. Show help instead.
+        if words.isEmpty, CommandLine.arguments[0].hasSuffix("/vtt") || CommandLine.arguments[0] == "vtt" { words = ["help"] }
         // macOS and Xcode pass flags like -NSDocumentRevisionsDebugMode. Not ours.
         guard let first = words.first, !first.hasPrefix("-") || ["--help", "-h", "--version"].contains(first) else { return nil }
         // Only picks the error format. A command reads its own flags in parse,

@@ -7,10 +7,14 @@ nonisolated final class FakeRecorder: AudioRecording, @unchecked Sendable {
     var startDelay: Duration = .milliseconds(100)
     var failure: Error?
     var levelValue: Float = 0.7
+    /// What stop returns: how long it recorded.
+    var duration: TimeInterval = 1.5
     private(set) var isRecording = false
     private var url: URL?
 
     func start(to url: URL, timeout: Duration) async throws {
+        // Like MicRecorder: the old recording goes before the mic opens.
+        try? FileManager.default.removeItem(at: url)
         try? await Task.sleep(for: startDelay)
         if let failure { throw failure }
         self.url = url
@@ -20,7 +24,7 @@ nonisolated final class FakeRecorder: AudioRecording, @unchecked Sendable {
 
     func stop() async -> TimeInterval {
         isRecording = false
-        return 1.5
+        return duration
     }
 
     func cancel() async {

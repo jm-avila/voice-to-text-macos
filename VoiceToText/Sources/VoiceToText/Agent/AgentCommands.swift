@@ -7,7 +7,10 @@ enum AgentCommands {
     static let all: [AgentCommand] = [
         AgentCommand(name: "status", summary: "What the app is doing, its settings, and whether it has the key, the mic, and Accessibility.",
                      example: "vtt status --json", readOnly: true) { _, services in
-            services.agentStatus
+            var status = services.agentStatus
+            // /usr/bin/security can wait on a locked keychain: never on the main thread.
+            status["openAIKey"] = await Task.detached { APIKey.read() }.value == nil ? "missing" : "found"
+            return status
         },
         AgentCommand(name: "start", summary: "Start recording the microphone. Returns once the mic is live: talk after that.",
                      example: "vtt start") { _, services in
@@ -52,13 +55,14 @@ enum AgentCommands {
                      example: "vtt history list --limit 3 --json", readOnly: true) { args, services in
             let limit = try args.int("limit", default: 10)
             guard limit > 0 else { throw AgentError.usage("--limit must be 1 or more") }
+            services.dictation.reloadHistory()
             let history = services.dictation.history
             return ["entries": history.suffix(limit).reversed().map { ["date": $0.date, "text": $0.text] },
                     "total": history.count, "file": services.store.historyURL.path]
         },
         AgentCommand(name: "settings update", summary: "Change the model, the language, or the sounds. Only the options you give change.",
                      params: [.init(name: "model", help: DictationSettings.models.joined(separator: ", ")),
-                              .init(name: "language", help: "a language code like en or es, or auto to detect it"),
+                              .init(name: "language", help: "a two-letter ISO 639-1 code like en or es, or auto to detect it"),
                               .init(name: "sounds", kind: .boolean, help: "Tink when the mic is live, Pop when it stops")],
                      example: "vtt settings update --language es --json") { args, services in
             // Check every option before changing anything.
@@ -70,8 +74,8 @@ enum AgentCommands {
                 settings.model = model
             }
             if let language = args.string("language")?.lowercased() {
-                guard language == "auto" || language.wholeMatch(of: /[a-z]{2,3}/) != nil else {
-                    throw AgentError.usage("--language takes a code like en or es, or auto")
+                guard language == "auto" || language.wholeMatch(of: /[a-z]{2}/) != nil else {
+                    throw AgentError.usage("--language takes a two-letter code like en or es, or auto")
                 }
                 settings.language = language == "auto" ? "" : language
             }
@@ -90,7 +94,6 @@ extension Services {
             "model": dictation.settings.model,
             "language": dictation.settings.languageCode ?? "auto",
             "sounds": dictation.settings.sounds,
-            "openAIKey": APIKey.read() == nil ? "missing" : "found",
             "microphone": permissions.microphone.rawValue,
             "accessibility": permissions.accessibility,
             "shortcut": hotkeys.combo.symbols,

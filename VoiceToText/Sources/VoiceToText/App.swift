@@ -71,7 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if SelfTest.runIfRequested(services: services) { return }
         if Snapshot.runIfRequested(services: services) { return }
         // After the checks above: a refused test run must not take over the real app's socket.
-        AgentSocket.listen { await AgentRouter.handle($0) }
+        guard AgentSocket.listen(handle: { await AgentRouter.handle($0) }) else {
+            // Started from a terminal while the app runs: one copy owns the hotkey and the socket.
+            print("VoiceToText is already running. Use `vtt help`.")
+            NSApp.terminate(nil)
+            return
+        }
         services.start()
     }
 

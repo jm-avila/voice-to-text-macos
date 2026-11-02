@@ -38,14 +38,13 @@ struct Store {
 
     /// Appends one entry. Never rewrites the file, so the bash tool's
     /// entries and any edits by hand stay as they are.
+    /// O_APPEND, like the bash tool's `>>`: when the file cannot be opened it
+    /// fails instead of writing a new file over the old one.
     func appendHistory(_ text: String, at date: Date = .now) throws {
         let data = Data(HistoryLog.entry(text, at: date).utf8)
-        guard let handle = try? FileHandle(forWritingTo: historyURL) else {
-            try data.write(to: historyURL, options: .atomic)
-            return
-        }
-        defer { try? handle.close() }
-        try handle.seekToEnd()
+        let fd = open(historyURL.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
+        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: historyURL.path]) }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         try handle.write(contentsOf: data)
     }
 

@@ -104,6 +104,8 @@ final class Sounds {
 @Observable
 final class Dictation {
     static let micTimeout: Duration = .seconds(10)
+    /// Shorter than this is a press and a change of mind: nothing to send.
+    static let shortest: TimeInterval = 0.3
 
     private(set) var state = DictationState.idle
     private(set) var notice: Notice?
@@ -153,6 +155,8 @@ final class Dictation {
     func start() async throws {
         guard state == .idle else { throw DictationError.busy(state.name) }
         cancelRequested = false
+        // Starting replaces the kept recording, so it cannot be retried any more.
+        canRetry = false
         update(.starting)
         do {
             try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout)
@@ -165,7 +169,6 @@ final class Dictation {
             update(.idle, notice: .canceled)
             throw DictationError.canceled
         }
-        canRetry = false
         update(.recording(since: .now))
         if settings.sounds { sounds.play(.start) }
     }
@@ -177,7 +180,10 @@ final class Dictation {
         // The cue plays on the press: capture ends right after it.
         if settings.sounds { sounds.play(.stop) }
         update(.transcribing)
-        _ = await recorder.stop()
+        guard await recorder.stop() >= Self.shortest else {
+            update(.idle, notice: .nothingHeard)
+            return ""
+        }
         return try await transcribeRecording(paste: paste)
     }
 
@@ -196,8 +202,9 @@ final class Dictation {
         case .starting:
             cancelRequested = true
         case .recording:
-            await recorder.cancel()
+            // Idle first, so a press while the recorder stops cannot also stop and transcribe.
             update(.idle, notice: .canceled)
+            await recorder.cancel()
         case .idle, .transcribing:
             break
         }
@@ -208,7 +215,8 @@ final class Dictation {
         try await transcriber.transcribe(file, model: settings.model, language: settings.languageCode)
     }
 
-    /// Reads history.md again (seed data, or the bash tool wrote to it).
+    /// Reads history.md again: the bash tool or a person may have changed it.
+    /// The menu, Settings, and `vtt history list` call it before they show it.
     func reloadHistory() {
         history = store.loadHistory()
     }
@@ -235,8 +243,12 @@ final class Dictation {
             return ""
         }
         let now = Date.now
-        try? store.appendHistory(text, at: now)
-        history.append(HistoryEntry(date: HistoryLog.stamp(now), text: text))
+        do {
+            try store.appendHistory(text, at: now)
+            history.append(HistoryEntry(date: HistoryLog.stamp(now), text: text))
+        } catch {
+            lastError = "Could not save to history: \(error.localizedDescription)"
+        }
         if paste {
             let pasted = await paster.paste(text)
             update(.idle, notice: pasted ? .pasted : .copied)

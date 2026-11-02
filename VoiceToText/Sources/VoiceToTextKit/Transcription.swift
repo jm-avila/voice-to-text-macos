@@ -93,7 +93,7 @@ public struct OpenAITranscriber: Transcribing {
         guard let audio = try? Data(contentsOf: file), !audio.isEmpty else { throw TranscriptionError.emptyRecording }
         guard audio.count <= TranscriptionRequest.maxBytes else { throw TranscriptionError.tooLarge(bytes: audio.count) }
         let form = TranscriptionRequest(model: model, language: language)
-        var request = URLRequest(url: baseURL.appending(path: "audio/transcriptions"), timeoutInterval: 120)
+        var request = URLRequest(url: baseURL.appending(path: "audio/transcriptions"), timeoutInterval: 600)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")

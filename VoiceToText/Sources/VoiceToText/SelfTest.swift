@@ -60,8 +60,9 @@ enum SelfTest {
         check("S-002 once the mic is live, it records", dictation.state.name == "recording")
         check("S-002 Tink plays when the mic is live", dictation.sounds.lastCue == .start)
         check("S-002 the menu bar shows a red mic", services.statusItem.symbolName == "mic.fill")
-        check("the HUD never takes focus or clicks",
-              services.hud.window?.isKeyWindow == false && services.hud.window?.ignoresMouseEvents == true)
+        let hud = services.hud.window
+        check("the HUD never takes focus or clicks", hud?.canBecomeKey == false && hud?.canBecomeMain == false
+                && hud?.styleMask.contains(.nonactivatingPanel) == true && hud?.ignoresMouseEvents == true)
 
         transcriber.delay = .milliseconds(300)
         let stopping = Task { await dictation.toggle() }
@@ -121,6 +122,15 @@ enum SelfTest {
         check("S-006 retry sends the kept recording and pastes", retried == "Second try worked." && !dictation.canRetry
                 && paster.last?.text == "Second try worked.")
 
+        // A new start replaces the kept recording: no retry offered after it.
+        transcriber.reply = .failure(TranscriptionError.network("offline"))
+        try? await dictation.start()
+        _ = try? await dictation.stop(paste: true)
+        recorder.failure = RecorderError.silent(.seconds(10))
+        _ = try? await dictation.start()
+        check("S-006 after a new start fails, the old recording is not offered for retry", !dictation.canRetry)
+        transcriber.reply = .success("Second try worked.")
+
         recorder.failure = RecorderError.silent(.seconds(10))
         let micFailed = (try? await dictation.start()) == nil
         check("S-006 a mic that sends no audio shows an error and goes back to ready",
@@ -140,6 +150,29 @@ enum SelfTest {
         let openedThenCanceled = (try? await opening.value) == nil
         check("S-009 cancel while the mic opens stops it once open", openedThenCanceled && dictation.state == .idle && !recorder.isRecording)
         recorder.startDelay = .milliseconds(50)
+
+        // S-003 A press and an instant change of mind sends nothing.
+        let sent = transcriber.calls.count
+        recorder.duration = 0.1
+        try? await dictation.start()
+        let blink = try? await dictation.stop(paste: true)
+        check("S-003 a recording under 0.3 s is not sent", blink == "" && transcriber.calls.count == sent
+                && dictation.notice == .nothingHeard && dictation.state == .idle)
+        recorder.duration = 1.5
+
+        // S-005 The bash tool appends too: the menu and the CLI read the file again.
+        try? store.appendHistory("Written by the bash tool.")
+        services.statusItem.menuNeedsUpdate(NSMenu())
+        check("S-005 an entry the bash tool appends shows in the menu", dictation.history.last?.text == "Written by the bash tool.")
+        // A history.md that cannot be written is left as it is, never replaced.
+        let fileBefore = historyFile()
+        chmod(store.historyURL.path, 0o444)
+        transcriber.reply = .success("Not saved.")
+        try? await dictation.start()
+        let unsaved = try? await dictation.stop(paste: false)
+        chmod(store.historyURL.path, 0o644)
+        check("S-005 when history.md is read-only, it keeps every entry and the error shows",
+              unsaved == "Not saved." && historyFile() == fileBefore && dictation.lastError?.contains("history") == true)
 
         // S-007 Settings are saved and used.
         dictation.settings.language = "es"

@@ -77,6 +77,22 @@ assert not reply["isError"]
 assert json.loads(reply["content"][0]["text"])["total"] == 1
 ' "$mcp" 2>/dev/null && pass "mcp: tools/call history_list answers from the running app" || fail "mcp tools/call ($mcp)"
 
+# A client that hangs up before its reply must not kill the app (SIGPIPE).
+pid=$(lsof -t "$APP_AGENT_SOCKET" 2>/dev/null | head -1)
+python3 -I -c '
+import json, socket, sys
+s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])
+s.sendall((json.dumps({"command": "transcribe", "args": {"file": sys.argv[2]}}) + "\n").encode()); s.close()
+' "$APP_AGENT_SOCKET" "$work/hello.m4a"
+sleep 4
+[[ $(lsof -t "$APP_AGENT_SOCKET" 2>/dev/null | head -1) == "$pid" ]] && pass "agent: a client that hangs up mid-command leaves the app running" || fail "app died after a client hung up"
+
+# A second copy started from a terminal leaves the running one alone.
+second=$("$cli" 2>&1 & sleep 3; kill $! 2>/dev/null)
+[[ $second == *"already running"* && $(lsof -t "$APP_AGENT_SOCKET" 2>/dev/null | head -1) == "$pid" ]] \
+  && pass "a second copy quits and the first keeps its socket" || fail "second copy ($second)"
+~/.local/bin/vtt | rg -q '^vtt: drive the app' && pass "agent: vtt alone prints help, it does not start the app in the terminal" || fail "bare vtt"
+
 # Settings survive a restart.
 quit_copy
 after=$("$cli" status --json)

@@ -34,27 +34,45 @@ nonisolated enum AgentSocket {
     // MARK: App side
 
     /// Starts listening. `handle` runs on the main actor for each request.
-    static func listen(handle: @escaping @MainActor @Sendable (Data) async -> Data) {
+    /// False when another copy of the app already answers on this socket.
+    @discardableResult
+    static func listen(handle: @escaping @MainActor @Sendable (Data) async -> Data) -> Bool {
         let path = self.path
+        if isAnswering(path) { return false }
         unlink(path)
         let server = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard server >= 0, var address = try? address(path) else { return }
+        guard server >= 0, var address = try? address(path) else { return true }
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(server, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard bound == 0, Darwin.listen(server, 16) == 0 else {
             print("AGENT could not listen on \(path): \(String(cString: strerror(errno)))")
             close(server)
-            return
+            return true
         }
         chmod(path, 0o600)
         Thread.detachNewThread {
             while true {
                 let client = accept(server, nil, nil)
-                guard client >= 0 else { continue }
+                guard client >= 0 else {
+                    // Out of file descriptors, say: wait instead of spinning.
+                    if errno != EINTR { Thread.sleep(forTimeInterval: 0.1) }
+                    continue
+                }
                 Thread.detachNewThread { serve(client, handle: handle) }
             }
         }
+        return true
+    }
+
+    /// True when an app listens at `path`. A socket file left by a crash refuses the connection.
+    private static func isAnswering(_ path: String) -> Bool {
+        let probe = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard probe >= 0, var address = try? address(path) else { return false }
+        defer { close(probe) }
+        return withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(probe, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        } == 0
     }
 
     private static func serve(_ client: Int32, handle: @escaping @MainActor @Sendable (Data) async -> Data) {

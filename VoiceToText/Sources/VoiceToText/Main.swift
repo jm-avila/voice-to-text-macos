@@ -4,6 +4,8 @@ import AppKit
 @main
 enum Main {
     static func main() {
+        // A CLI or MCP client that quits before its reply would otherwise kill the app on write.
+        signal(SIGPIPE, SIG_IGN)
         if let code = AgentCLI.runIfRequested() { exit(code) }
         let app = NSApplication.shared
         let delegate = AppDelegate()
