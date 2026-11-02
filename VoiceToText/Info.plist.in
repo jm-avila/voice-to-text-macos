@@ -15,5 +15,5 @@
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>VoiceToText records your voice while you dictate and sends it to OpenAI to turn it into text.</string>
+<key>NSMicrophoneUsageDescription</key><string>VoiceToText records your voice while you dictate and turns it into text, with OpenAI or a Whisper model on this Mac.</string>
 </dict></plist>

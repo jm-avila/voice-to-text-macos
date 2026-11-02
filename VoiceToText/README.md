@@ -1,54 +1,34 @@
-# VoiceToText (native app)
+# VoiceToText: developer notes
 
-The Swift version of voice-to-text: press ⌃., speak, press ⌃. again, and the text is pasted at your cursor.
-No Hammerspoon, no ffmpeg. It uses the same history file and the same Keychain key as the bash tool, so both read the
-same history.
+The native Swift app. **Users: see the [main README](../README.md)** for screenshots, requirements, permissions, setup
+and troubleshooting. This page covers how it is built and checked.
 
-![Recording](docs/hud-recording.png)
-
-## What you see
-
-| Where | What |
-| --- | --- |
-| Menu bar | A waveform when ready, a dimmed mic while the mic opens (don't talk yet), a red mic while recording, an ellipsis while transcribing. Click it for Start/Stop, Retry, the last 5 transcripts (click to copy), Open History, and Settings (⌘,). |
-| Bottom of the screen | A small glass pill while dictating, showing a level meter and the time, then "Pasted", "Copied", or the error. It never takes focus. |
-| Settings | Shortcut, model, language, sounds, Open at Login, and whether the OpenAI key, the local model, the microphone, and Accessibility are set up. |
-
-## Install
+## Build
 
 ```sh
-cd VoiceToText
-./build.sh            # builds, installs ~/Applications/VoiceToText.app, links ~/.local/bin/vtt
-open ~/Applications/VoiceToText.app
+./build.sh            # release build, installs ~/Applications/VoiceToText.app, links ~/.local/bin/vtt
+./build.sh --open     # same, then restarts the app
+tools/get-model.sh    # local model: whisper.cpp + ggml-large-v3-turbo.bin + ggml-silero-v5.1.2.bin
 ```
 
-Needs macOS 26 and the Command Line Tools (no Xcode). The key is the bash tool's: Keychain `OPENAI_API_KEY`
-(account `agent-secrets`), or `OPENAI_API_KEY` in the environment.
+A Swift package (swift-tools 6.2, macOS 26+) built with the Command Line Tools only. Ad hoc signing means every
+rebuild resets the Microphone and Accessibility grants.
 
-### Local model (optional)
+## Architecture
 
-Whisper large-v3-turbo through whisper.cpp, on this Mac: no key, no network, no cost.
+| Part | File | Role |
+|---|---|---|
+| State machine | `Sources/VoiceToText/Dictation.swift` | idle → starting → recording → transcribing. Hotkey, menu and CLI all go through it. |
+| Microphone | `Recorder.swift` | `AVAudioRecorder` behind `AudioRecording`. "Live" once `currentTime > 0`. |
+| Transcription | `Sources/VoiceToTextKit/Transcription.swift`, `LocalWhisper.swift` | `Transcribing` protocol. `RoutingTranscriber` picks `OpenAITranscriber` or `LocalWhisperTranscriber` by model id. |
+| Local model | `LocalWhisper.swift` | `afconvert` → 16 kHz WAV, then `whisper-cli --vad`. Drops segments that are only a noise tag; treats `error:` on stderr as a failure (whisper-cli exits 0 on some errors). |
+| Paste | `Dictation.swift` (`Paster`), `SystemHooks.swift` | Pasteboard, then a synthetic ⌘V when Accessibility is granted. |
+| UI | `StatusItem.swift`, `HUD.swift`, `SettingsView.swift` | Menu bar item, glass pill, Settings window. Colors in `UI/Theme.swift`, spacing in `UI/Grid.swift`. |
+| Agent | `Agent/` | `vtt` CLI over a Unix socket, and an MCP server. |
+| Wiring | `App.swift` | `Services.live()` or `Services.testing()` with the fakes in `Fakes.swift`. |
 
-```sh
-tools/get-model.sh    # brew install whisper-cpp if missing, downloads the model (1.6 GB) and the Silero voice detector (1 MB)
-```
-
-Then pick "Whisper large-v3-turbo (on this Mac)" under Model in Settings, or `vtt settings update --model
-whisper-large-v3-turbo-local`. A 4 s clip takes about 1.5 s on an M-series Mac, model load included. The voice detector
-stops Whisper from hearing "Thank you." in silence. Settings shows "Downloaded" once both files are in place.
-
-### Switch from the Hammerspoon version
-
-Both want ⌃.. While Hammerspoon holds it, Settings shows "Another app uses ⌃." with Try Again.
-
-1. Remove the `dofile(".../voice-to-text.lua")` line from `~/.hammerspoon/init.lua` and reload Hammerspoon.
-2. In VoiceToText Settings, press Try Again (or quit and reopen the app).
-3. Grant **Microphone** (asked on the first recording) and **Accessibility** (Settings > Allow) to VoiceToText.
-
-To go back, quit VoiceToText and restore the line. The history file is the same either way.
-
-`build.sh` signs with your Apple Development certificate when there is one. With ad hoc signing, every rebuild resets
-the Microphone and Accessibility grants. Without Accessibility, the text is copied and you press ⌘V.
+Logic without AppKit lives in `VoiceToTextKit` and is unit tested. Each boundary (recorder, transcriber, pasteboard)
+is a protocol, so the self-test runs with fakes.
 
 ## For agents: `vtt`
 
@@ -92,5 +72,13 @@ Two rounds of independent review found 18 issues. All were fixed except one:
 | A mic that dropped mid-dictation lost the recording (clock reads 0) | read only |
 | Two copies starting at once; start racing a pending cancel; cancel ordering | read only |
 | `vtt status` ran `security` on the main thread; 3-letter languages; timeouts; accept() spin; error text | read only |
+
+The local model (PR #5) had two more rounds and 6 findings, all fixed:
+- An e2e check that passed on error.
+- A regex that deleted spoken parentheses.
+- A stale Settings status.
+- Unknown languages failing silently.
+- A pipe deadlock risk.
+- `-nt` merging segments.
 
 Not fixed: ⌘V is sent as the V key position, so on Dvorak it sends another key. Fine for QWERTY and Spanish layouts.
