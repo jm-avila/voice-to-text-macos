@@ -25,13 +25,13 @@ public enum LocalWhisper {
          "-l", language.flatMap { $0.isEmpty ? nil : $0 } ?? "auto", "-nt", "-np"]
     }
 
-    /// whisper-cli's output as one line. Whisper marks noise as [BLANK_AUDIO],
-    /// (music), and the like; those are dropped so they read as nothing heard.
+    /// whisper-cli's output as one line. It prints one segment per line;
+    /// a segment that is only a noise tag ([BLANK_AUDIO], (music), *laughs*)
+    /// is dropped. Parentheses inside a sentence are the person's words and stay.
     public static func clean(_ raw: String) -> String {
-        Transcript.clean(raw)
-            .replacing(/\[[^\]]*\]|\([^)]*\)/, with: "")
-            .split(separator: " ")
-            .joined(separator: " ")
+        Transcript.clean(raw.split(whereSeparator: \.isNewline)
+            .filter { $0.trimmingCharacters(in: .whitespaces).wholeMatch(of: /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/) == nil }
+            .joined(separator: "\n"))
     }
 }
 
@@ -67,26 +67,34 @@ public struct LocalWhisperTranscriber: Transcribing {
 
     /// stdout, or the tool's own error. Off the main thread: a long recording takes seconds.
     static func run(_ tool: URL, _ arguments: [String]) async throws -> String {
-        try await Task.detached {
-            let process = Process()
-            process.executableURL = tool
-            process.arguments = arguments
-            let out = Pipe(), err = Pipe()
-            process.standardOutput = out
-            process.standardError = err
-            do { try process.run() } catch {
-                throw TranscriptionError.local("\(tool.lastPathComponent): \(error.localizedDescription)")
-            }
-            // Read before waiting: a full pipe would block the tool forever.
-            let stdout = out.fileHandleForReading.readDataToEndOfFile()
-            let stderr = err.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
-            guard process.terminationStatus == 0 else {
-                let message = Transcript.clean(String(decoding: stderr, as: UTF8.self)).suffix(200)
-                throw TranscriptionError.local("\(tool.lastPathComponent) failed: \(message)")
-            }
-            return String(decoding: stdout, as: UTF8.self)
-        }.value
+        try await Task.detached { try runBlocking(tool, arguments) }.value
+    }
+
+    private static func runBlocking(_ tool: URL, _ arguments: [String]) throws -> String {
+        let process = Process()
+        process.executableURL = tool
+        process.arguments = arguments
+        let out = Pipe(), err = Pipe()
+        process.standardOutput = out
+        process.standardError = err
+        do { try process.run() } catch {
+            throw TranscriptionError.local("\(tool.lastPathComponent): \(error.localizedDescription)")
+        }
+        // Drain both pipes at once before waiting: a full pipe would block the tool forever.
+        nonisolated(unsafe) var stderr = Data()
+        let drained = DispatchGroup()
+        DispatchQueue.global().async(group: drained) { stderr = err.fileHandleForReading.readDataToEndOfFile() }
+        let stdout = out.fileHandleForReading.readDataToEndOfFile()
+        drained.wait()
+        process.waitUntilExit()
+        let errors = String(decoding: stderr, as: UTF8.self)
+        // whisper-cli exits 0 on some errors (an unknown language), printing "error: ...".
+        let reported = errors.split(whereSeparator: \.isNewline).first { $0.hasPrefix("error:") }
+        guard process.terminationStatus == 0, reported == nil else {
+            let message = reported.map(String.init) ?? String(Transcript.clean(errors).suffix(200))
+            throw TranscriptionError.local("\(tool.lastPathComponent) failed: \(message)")
+        }
+        return String(decoding: stdout, as: UTF8.self)
     }
 }
 

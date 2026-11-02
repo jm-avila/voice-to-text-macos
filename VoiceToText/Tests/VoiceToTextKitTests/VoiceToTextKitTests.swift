@@ -236,11 +236,12 @@ struct LocalModel {
         #expect(args == ["-m", "/m.bin", "--vad", "-vm", "/v.bin", "-f", "/a.wav", "-l", expected, "-nt", "-np"])
     }
 
-    @Test("Whisper's noise markers are dropped; text stays one line", arguments: [
+    @Test("Segments that are only a noise tag are dropped; spoken parentheses stay", arguments: [
         ("\n The quick brown fox.\n", "The quick brown fox."),
         ("[BLANK_AUDIO]", ""),
-        (" (music) Hola, ¿qué tal?\n [BLANK_AUDIO]\n", "Hola, ¿qué tal?"),
-        ("First. [ Silence ] Second.", "First. Second."),
+        (" (music)\n Hola, ¿qué tal?\n [BLANK_AUDIO]\n", "Hola, ¿qué tal?"),
+        ("*laughs*\nOK, first.\nSecond.", "OK, first. Second."),
+        ("The API (application programming interface) is down.", "The API (application programming interface) is down."),
     ])
     func clean(raw: String, expected: String) {
         #expect(LocalWhisper.clean(raw) == expected)
@@ -283,4 +284,22 @@ struct LocalModel {
 private struct Echo: Transcribing {
     let name: String
     func transcribe(_ file: URL, model: String, language: String?) async throws -> String { name }
+}
+
+@Suite("S-010 whisper-cli errors reach the person")
+struct LocalErrors {
+    @Test("An error printed with exit 0 (unknown language) is thrown, not read as silence")
+    func errorWithExitZero() async throws {
+        await #expect(throws: TranscriptionError.local("sh failed: error: unknown language 'zz'")) {
+            try await LocalWhisperTranscriber.run(URL(fileURLWithPath: "/bin/sh"),
+                                                  ["-c", "echo \"whisper_lang_id: unknown language 'zz'\" >&2; echo \"error: unknown language 'zz'\" >&2"])
+        }
+    }
+
+    @Test("A tool that writes a lot to both pipes does not hang")
+    func bothPipes() async throws {
+        let out = try await LocalWhisperTranscriber.run(URL(fileURLWithPath: "/bin/sh"),
+                                                        ["-c", "head -c 200000 /dev/zero | tr '\\0' x >&2; echo done"])
+        #expect(out == "done\n")
+    }
 }

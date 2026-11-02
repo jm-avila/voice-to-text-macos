@@ -68,7 +68,7 @@ Exit codes: 0 ok, 1 error, 2 usage, 3 not found, 4 app not running. The skill fo
 
 | Check | Command | Result |
 | --- | --- | --- |
-| Unit tests | `tools/test.sh .` | 22 tests (transcript cleanup, history format, request, settings, local model) pass |
+| Unit tests | `tools/test.sh .` | 24 tests (transcript cleanup, history format, request, settings, local model) pass |
 | Self-test | `tools/selftest.sh` | 51 checks pass, with a fake mic and transcriber |
 | End to end | `tools/e2e.sh` | 20 checks pass against the real API and the local model: `say` clips in English and Spanish, silence, CLI, MCP, restart |
 | Agent CLI | BAMA's `check-agent-cli.sh` | PASS |

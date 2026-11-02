@@ -76,7 +76,7 @@ has "$(json "$lo" "d['text']")" "mercado" && pass "S-010 local model, Spanish de
 say -o "$work/quiet.aiff" "[[slnc 2000]]"
 afconvert -f m4af -d aac "$work/quiet.aiff" "$work/quiet.m4a"
 lo=$("$cli" transcribe "$work/quiet.m4a" --json)
-[[ -z $(json "$lo" "d['text']") ]] && pass "S-010 local model hears nothing in silence (no \"Thank you.\")" || fail "S-010 silence ($lo)"
+[[ $(json "$lo" "d.get('text', 'MISSING')") == "" ]] && pass "S-010 local model hears nothing in silence (no \"Thank you.\")" || fail "S-010 silence ($lo)"
 "$cli" settings update --language es --model gpt-4o-mini-transcribe --json >/dev/null
 
 # MCP: one tool call over stdin and stdout.

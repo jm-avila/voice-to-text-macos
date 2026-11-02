@@ -113,7 +113,7 @@ struct SettingsView: View {
                     }
                 }
                 LabeledContent("Local model") {
-                    switch LocalWhisper.status {
+                    switch permissions.localModel {
                     case .ready: Status(ok: true, text: "Downloaded")
                     case .noModel: Status(ok: false, text: "Not downloaded")
                     case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
@@ -136,13 +136,7 @@ struct SettingsView: View {
             } header: {
                 Text("Access")
             } footer: {
-                Text(keyFound == false
-                     ? "Add your key: secret set OPENAI_API_KEY -p openai --clip"
-                     : LocalWhisper.status == .noCLI
-                     ? "For the local model: brew install whisper-cpp"
-                     : LocalWhisper.status == .noModel
-                     ? "For the local model, run VoiceToText/tools/get-model.sh (1.6 GB)."
-                     : "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself.")
+                Text(footer)
                     .foregroundStyle(.secondary)
             }
 
@@ -162,6 +156,16 @@ struct SettingsView: View {
         .fitsContent(max: 760)
         .frame(width: 480)
         .task { keyFound = await Task.detached { APIKey.read() != nil }.value }
+    }
+
+    /// The one hint that matters most for the model in use.
+    private var footer: String {
+        let local = dictation.settings.model == LocalWhisper.model
+        if local, permissions.localModel != .ready {
+            return "For the local model, run VoiceToText/tools/get-model.sh (whisper.cpp and 1.6 GB of model)."
+        }
+        if !local, keyFound == false { return "Add your key: secret set OPENAI_API_KEY -p openai --clip" }
+        return "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself."
     }
 
     static func languageName(_ code: String) -> String {
