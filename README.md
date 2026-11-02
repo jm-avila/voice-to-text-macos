@@ -56,6 +56,7 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 | Login item (optional) | Settings › Open at Login | Start with your Mac | Open the app yourself |
 | Network | None | Only the OpenAI models send audio, to `api.openai.com` | The local model works offline |
 
+> [!WARNING]
 > **Rebuilds reset permissions.** Without an Apple Development certificate the app is signed ad hoc, so every rebuild is a
 > new app to macOS. It drops the Microphone and Accessibility grants. If text gets copied but not pasted after a
 > rebuild, see [Troubleshooting](#troubleshooting).
