@@ -10,6 +10,9 @@ ctrl+.  →  Hammerspoon (Lua)  →  voice-to-text (bash)  →  ffmpeg (mic → 
         ←  cmd+v at cursor    ←  transcript on stdout   →  history.md
 ```
 
+> **Native app:** [`VoiceToText/`](VoiceToText/README.md) is a Swift menu bar version of this tool, with no
+> Hammerspoon and no ffmpeg. It uses the same shortcut, history file, and Keychain key. Run one of the two at a time.
+
 ## Features
 
 - Toggle hotkey: `ctrl+.` to start, `ctrl+.` again to stop.
