@@ -227,21 +227,24 @@ struct Settings {
 
 @Suite("S-010 Dictate with the local model")
 struct LocalModel {
-    @Test("whisper-cli prints only the text, with the voice detector, in the chosen language", arguments: [
+    @Test("whisper-cli prints only the segments, with the voice detector, in the chosen language", arguments: [
         (String?.none, "auto"), ("", "auto"), ("es", "es"),
     ])
     func arguments(language: String?, expected: String) {
         let args = LocalWhisper.arguments(model: URL(fileURLWithPath: "/m.bin"), vad: URL(fileURLWithPath: "/v.bin"),
                                           wav: URL(fileURLWithPath: "/a.wav"), language: language)
-        #expect(args == ["-m", "/m.bin", "--vad", "-vm", "/v.bin", "-f", "/a.wav", "-l", expected, "-nt", "-np"])
+        #expect(args == ["-m", "/m.bin", "--vad", "-vm", "/v.bin", "-f", "/a.wav", "-l", expected, "-np"])
     }
 
     @Test("Segments that are only a noise tag are dropped; spoken parentheses stay", arguments: [
-        ("\n The quick brown fox.\n", "The quick brown fox."),
-        ("[BLANK_AUDIO]", ""),
-        (" (music)\n Hola, ¿qué tal?\n [BLANK_AUDIO]\n", "Hola, ¿qué tal?"),
-        ("*laughs*\nOK, first.\nSecond.", "OK, first. Second."),
-        ("The API (application programming interface) is down.", "The API (application programming interface) is down."),
+        ("\n[00:00:00.070 --> 00:00:05.650]   The quick brown fox.\n", "The quick brown fox."),
+        ("\n[00:00:00.000 --> 00:00:02.000]   [BLANK_AUDIO]\n", ""),
+        ("[00:00:00.000 --> 00:00:01.000]   (music)\n[00:00:01.000 --> 00:00:03.000]   Hola, ¿qué tal?\n[00:00:03.000 --> 00:00:05.000]   [BLANK_AUDIO]\n",
+         "Hola, ¿qué tal?"),
+        ("[00:00:00.000 --> 00:00:01.000]   *laughs*\n[00:00:01.000 --> 00:00:02.000]   OK, first.\n[00:00:02.000 --> 00:00:03.000]   Second.",
+         "OK, first. Second."),
+        ("[00:00:00.000 --> 00:00:04.000]   The API (application programming interface) is down.",
+         "The API (application programming interface) is down."),
     ])
     func clean(raw: String, expected: String) {
         #expect(LocalWhisper.clean(raw) == expected)

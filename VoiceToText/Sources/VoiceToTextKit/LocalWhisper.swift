@@ -19,18 +19,20 @@ public enum LocalWhisper {
         cliPaths.first(where: fileManager.isExecutableFile(atPath:)).map(URL.init(fileURLWithPath:))
     }
 
-    /// whisper-cli's arguments: plain text on stdout, nothing else.
+    /// whisper-cli's arguments: only the segments on stdout, one per line with
+    /// its timestamps. With -nt it would print them all on one line.
     public static func arguments(model: URL, vad: URL, wav: URL, language: String?) -> [String] {
         ["-m", model.path, "--vad", "-vm", vad.path, "-f", wav.path,
-         "-l", language.flatMap { $0.isEmpty ? nil : $0 } ?? "auto", "-nt", "-np"]
+         "-l", language.flatMap { $0.isEmpty ? nil : $0 } ?? "auto", "-np"]
     }
 
-    /// whisper-cli's output as one line. It prints one segment per line;
-    /// a segment that is only a noise tag ([BLANK_AUDIO], (music), *laughs*)
-    /// is dropped. Parentheses inside a sentence are the person's words and stay.
+    /// whisper-cli's segments ("[00:00:00.000 --> 00:00:02.000]  text") as
+    /// one line. A segment that is only a noise tag ([BLANK_AUDIO], (music),
+    /// *laughs*) is dropped. Parentheses inside a sentence are the person's words and stay.
     public static func clean(_ raw: String) -> String {
         Transcript.clean(raw.split(whereSeparator: \.isNewline)
-            .filter { $0.trimmingCharacters(in: .whitespaces).wholeMatch(of: /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/) == nil }
+            .map { $0.replacing(/^\s*\[[^\]]*-->[^\]]*\]/, with: "").trimmingCharacters(in: .whitespaces) }
+            .filter { $0.wholeMatch(of: /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/) == nil }
             .joined(separator: "\n"))
     }
 }
