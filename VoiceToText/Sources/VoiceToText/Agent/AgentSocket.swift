@@ -38,6 +38,9 @@ nonisolated enum AgentSocket {
     @discardableResult
     static func listen(handle: @escaping @MainActor @Sendable (Data) async -> Data) -> Bool {
         let path = self.path
+        // One copy at a time, even when two start at once. The kernel drops the lock when the app quits or crashes.
+        let lock = open(path + ".lock", O_CREAT | O_RDWR | O_CLOEXEC, 0o600)
+        if lock >= 0, flock(lock, LOCK_EX | LOCK_NB) != 0 { close(lock); return false }
         if isAnswering(path) { return false }
         unlink(path)
         let server = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -118,7 +121,8 @@ nonisolated enum AgentSocket {
         guard connected == 0 else { throw AgentError.unavailable("not running") }
         write(client, request + Data("\n".utf8))
         // `stop` waits for OpenAI: a long recording takes a while to upload and transcribe.
-        var timeout = timeval(tv_sec: 300, tv_usec: 0)
+        // Longer than the app's own 600 s transcription timeout, so the app answers first.
+        var timeout = timeval(tv_sec: 900, tv_usec: 0)
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         return readLine(client)
     }

@@ -127,6 +127,8 @@ final class Dictation {
     @ObservationIgnored var onChange: () -> Void = {}
     @ObservationIgnored private var cancelRequested = false
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    /// A cancel still stopping the recorder. The next start waits for it.
+    @ObservationIgnored private var canceling: Task<Void, Never>?
 
     init(store: Store, recorder: AudioRecording, transcriber: Transcribing, paster: Paster) {
         self.store = store
@@ -158,6 +160,7 @@ final class Dictation {
         // Starting replaces the kept recording, so it cannot be retried any more.
         canRetry = false
         update(.starting)
+        await canceling?.value
         do {
             try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout)
         } catch {
@@ -204,7 +207,9 @@ final class Dictation {
         case .recording:
             // Idle first, so a press while the recorder stops cannot also stop and transcribe.
             update(.idle, notice: .canceled)
-            await recorder.cancel()
+            let task = Task { [recorder] in await recorder.cancel() }
+            canceling = task
+            await task.value
         case .idle, .transcribing:
             break
         }

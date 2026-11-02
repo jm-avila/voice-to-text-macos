@@ -75,10 +75,15 @@ nonisolated final class MicRecorder: AudioRecording, @unchecked Sendable {
     func stop() async -> TimeInterval {
         await withCheckedContinuation { continuation in
             queue.async {
-                let seconds = self.recorder?.currentTime ?? 0
-                self.recorder?.stop()
+                guard let recorder = self.recorder else { return continuation.resume(returning: 0) }
+                let clock = recorder.currentTime
+                recorder.stop()
                 self.recorder = nil
-                continuation.resume(returning: seconds)
+                // The clock reads 0 when the recorder stopped on its own (a headset
+                // unplugged mid-dictation): the file still has the audio, so measure it.
+                let file = try? AVAudioFile(forReading: recorder.url)
+                let recorded = file.map { Double($0.length) / $0.fileFormat.sampleRate } ?? 0
+                continuation.resume(returning: max(clock, recorded))
             }
         }
     }

@@ -7,6 +7,7 @@ enum AgentCommands {
     static let all: [AgentCommand] = [
         AgentCommand(name: "status", summary: "What the app is doing, its settings, and whether it has the key, the mic, and Accessibility.",
                      example: "vtt status --json", readOnly: true) { _, services in
+            services.dictation.reloadHistory()
             var status = services.agentStatus
             // /usr/bin/security can wait on a locked keychain: never on the main thread.
             status["openAIKey"] = await Task.detached { APIKey.read() }.value == nil ? "missing" : "found"

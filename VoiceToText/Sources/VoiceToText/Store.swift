@@ -43,7 +43,7 @@ struct Store {
     func appendHistory(_ text: String, at date: Date = .now) throws {
         let data = Data(HistoryLog.entry(text, at: date).utf8)
         let fd = open(historyURL.path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
-        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission, userInfo: [NSFilePathErrorKey: historyURL.path]) }
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         try handle.write(contentsOf: data)
     }
