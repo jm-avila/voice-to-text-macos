@@ -6,7 +6,8 @@ import VoiceToTextKit
 ///   APP_STORE=/tmp/VoiceToText-test.store APP_SEED=1 APP_SNAPSHOT=/tmp/VoiceToText-shots ~/Applications/VoiceToText.app/Contents/MacOS/VoiceToText
 /// drives a real dictation with the fake mic and transcriber and writes
 /// hud-<state>-light.png and -dark.png for every HUD state, then
-/// settings-light.png and -dark.png, then quits. Each PNG gets a
+/// settings-light.png and -dark.png (and settings-custom-, settings-recording-),
+/// then quits. Each PNG gets a
 /// <name>-layout.json with the grid probes (tools/check-layout.swift).
 /// APP_SNAPSHOT_PAGES=hud,settings limits the groups.
 enum Snapshot {
@@ -87,6 +88,19 @@ enum Snapshot {
                     services.settingsWindow.show()
                     await pause(1)
                     capture(to: "\(dir)/settings-\(mode).png", window: services.settingsWindow.nsWindow)
+                    // S-011: a changed shortcut (Reset shows), then recording one after a refused ⇧D.
+                    let custom = Shortcut(keyCode: 2, modifiers: Shortcut.option | Shortcut.command, key: "D")
+                    _ = services.hotkeys.change(to: custom)
+                    dictation.settings.shortcut = custom
+                    await pause(0.5)
+                    capture(to: "\(dir)/settings-custom-\(mode).png", window: services.settingsWindow.nsWindow)
+                    services.shortcutRecorder.start()
+                    _ = services.shortcutRecorder.handle(NSEvent.keyEvent(
+                        with: .keyDown, location: .zero, modifierFlags: .shift, timestamp: 0, windowNumber: 0, context: nil,
+                        characters: "D", charactersIgnoringModifiers: "D", isARepeat: false, keyCode: 2)!)
+                    await pause(0.5)
+                    capture(to: "\(dir)/settings-recording-\(mode).png", window: services.settingsWindow.nsWindow)
+                    services.shortcutRecorder.reset()
                 }
                 services.settingsWindow.close()
             }

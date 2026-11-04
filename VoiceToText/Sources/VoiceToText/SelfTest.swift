@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import VoiceToTextKit
 
 /// Self-test for agents: runs the app's real functions with a fake mic, a
@@ -231,6 +232,41 @@ enum SelfTest {
               updated?["language"] as? String == "es" && dictation.settings.sounds == false && dictation.settings.model == "gpt-4o-transcribe")
         _ = await agent("settings update", ["language": "auto", "sounds": "true"])
         check("S-008 language auto clears it", dictation.settings.languageCode == nil)
+
+        // S-011 Change the shortcut: the next press with ⌃, ⌥ or ⌘ becomes it, saved to settings.json.
+        func press(_ keyCode: Int, _ flags: NSEvent.ModifierFlags, _ characters: String) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
+                             keyCode: UInt16(keyCode))!
+        }
+        let shortcuts = services.shortcutRecorder
+        let optionD = Shortcut(keyCode: UInt32(kVK_ANSI_D), modifiers: Shortcut.option | Shortcut.command, key: "D")
+        check("S-011 a key press reads as the key printed on it", Shortcut(event: press(kVK_ANSI_D, [.option, .command], "∂")) == optionD,
+              Shortcut(event: press(kVK_ANSI_D, [.option, .command], "∂")).symbols)
+        check("S-011 Space has a name and no menu key",
+              Shortcut(event: press(kVK_Space, .control, " ")).symbols == "⌃Space" && Shortcut(event: press(kVK_Space, .control, " ")).menuKey == "")
+        check("S-011 a press is ignored until Change is clicked", !shortcuts.handle(press(kVK_ANSI_D, [.option, .command], "d")))
+        shortcuts.start()
+        check("S-011 Change starts recording", shortcuts.isRecording)
+        check("S-011 a key with only ⇧ is refused and recording goes on",
+              shortcuts.handle(press(kVK_ANSI_D, .shift, "D")) && shortcuts.problem != nil && shortcuts.isRecording
+                && dictation.settings.shortcut == .standard)
+        _ = shortcuts.handle(press(kVK_Escape, [], "\u{1b}"))
+        check("S-011 Escape cancels and keeps the shortcut", !shortcuts.isRecording && dictation.settings.shortcut == .standard)
+        shortcuts.start()
+        _ = shortcuts.handle(press(kVK_ANSI_D, [.option, .command], "d"))
+        check("S-011 the new shortcut is used and saved",
+              !shortcuts.isRecording && shortcuts.problem == nil && services.hotkeys.combo == optionD
+                && Store(directory: store.directory).loadSettings().shortcut == optionD)
+        check("S-011 status reports the new shortcut", result(await agent("status"))?["shortcut"] as? String == "⌥⌘D")
+        shortcuts.reset()
+        check("S-011 Reset goes back to ⌃.", services.hotkeys.combo == .standard
+                && Store(directory: store.directory).loadSettings().shortcut == .standard)
+        shortcuts.start()
+        services.settingsWindow.show()
+        services.settingsWindow.close()
+        await wait(0.2)
+        check("S-011 closing Settings stops recording", !shortcuts.isRecording)
 
         // Every SF Symbol the app uses exists.
         let symbols = ["waveform", "mic", "mic.fill", "ellipsis", "checkmark.circle.fill", "doc.on.clipboard", "ear",

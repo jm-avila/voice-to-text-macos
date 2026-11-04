@@ -52,11 +52,12 @@ final class StatusItem: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         dictation.reloadHistory()
-        let shortcut = hotkeys.combo.symbols
+        let combo = hotkeys.combo
+        let shortcut = combo.symbols
         menu.addItem(.sectionHeader(title: headline))
         switch dictation.state {
         case .idle:
-            menu.addItem(action("Start Dictation", key: ".", modifiers: .control) { [dictation] in
+            menu.addItem(action("Start Dictation", key: combo.menuKey, modifiers: combo.menuModifiers) { [dictation] in
                 Task { try? await dictation.start() }
             })
             if dictation.canRetry {
@@ -66,7 +67,7 @@ final class StatusItem: NSObject, NSMenuDelegate {
             }
         case .starting, .recording:
             if case .recording = dictation.state {
-                menu.addItem(action("Stop and Paste", key: ".", modifiers: .control) { [dictation] in
+                menu.addItem(action("Stop and Paste", key: combo.menuKey, modifiers: combo.menuModifiers) { [dictation] in
                     Task { _ = try? await dictation.stop(paste: true) }
                 })
             }

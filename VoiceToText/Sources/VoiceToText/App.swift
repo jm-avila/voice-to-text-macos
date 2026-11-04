@@ -17,6 +17,7 @@ final class Services {
     let hotkeys = HotkeyCenter.shared
     let loginItem = LoginItem()
     let dictation: Dictation
+    let shortcutRecorder: ShortcutRecorder
     let hud: RecordingHUD
     private(set) var statusItem: StatusItem!
     private(set) var settingsWindow: SettingsWindow!
@@ -25,6 +26,7 @@ final class Services {
         store = Store()
         dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, paster: Paster(pasteboard: pasteboard))
         hud = RecordingHUD(dictation: dictation)
+        shortcutRecorder = ShortcutRecorder(hotkeys: hotkeys, dictation: dictation)
         settingsWindow = SettingsWindow { [unowned self] in self }
         statusItem = StatusItem(dictation: dictation, hotkeys: hotkeys) { [unowned self] in settingsWindow.show() }
         dictation.onChange = { [unowned self] in
@@ -54,7 +56,7 @@ final class Services {
         permissions.startPolling()
         // A test copy (APP_STORE) never takes the global shortcut from the real app.
         if !Store.isOverridden {
-            hotkeys.register(.dictate) { [weak self] in
+            hotkeys.register(dictation.settings.shortcut) { [weak self] in
                 guard let self else { return }
                 Task { await self.dictation.toggle() }
             }

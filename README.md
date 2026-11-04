@@ -20,7 +20,7 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 
 ## Features
 
-- **One shortcut**, ⌃. to start and ⌃. to stop. Works in any app.
+- **One shortcut**, ⌃. to start and ⌃. to stop. Works in any app. Change it in Settings › Shortcut › Change… (Reset goes back to ⌃.).
 - **Pastes at the cursor.** The text also stays on the clipboard.
 - **Two kinds of model:**
   - OpenAI: `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`.

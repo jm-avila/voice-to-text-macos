@@ -225,6 +225,51 @@ struct Settings {
     }
 }
 
+@Suite("S-011 Change the shortcut")
+struct ChangeShortcut {
+    @Test("The default is ⌃.")
+    func standard() {
+        #expect(DictationSettings().shortcut == .standard)
+        #expect(Shortcut.standard.symbols == "⌃.")
+        #expect(Shortcut.standard.problem == nil)
+    }
+
+    @Test("Modifiers read in Apple's order")
+    func symbols() {
+        let all = Shortcut(keyCode: 2, modifiers: Shortcut.command | Shortcut.shift | Shortcut.option | Shortcut.control, key: "D")
+        #expect(all.symbols == "⌃⌥⇧⌘D")
+        #expect(Shortcut(keyCode: 49, modifiers: Shortcut.option, key: "Space").symbols == "⌥Space")
+    }
+
+    @Test("Other bits (caps lock, the mouse button) are dropped")
+    func strayBits() {
+        #expect(Shortcut(keyCode: 2, modifiers: Shortcut.option | 0x0400 | 0x0080, key: "D").modifiers == Shortcut.option)
+    }
+
+    @Test("A key needs ⌃, ⌥ or ⌘", arguments: [
+        (UInt32(0), false), (Shortcut.shift, false), (Shortcut.control, true), (Shortcut.option | Shortcut.shift, true), (Shortcut.command, true),
+    ])
+    func needsModifier(modifiers: UInt32, ok: Bool) {
+        #expect((Shortcut(keyCode: 2, modifiers: modifiers, key: "D").problem == nil) == ok)
+    }
+
+    @Test("A key with no name is refused")
+    func noName() {
+        #expect(Shortcut(keyCode: 2, modifiers: Shortcut.control, key: "").problem != nil)
+    }
+
+    @Test("The shortcut is saved, and an old or broken one gives ⌃.")
+    func saved() throws {
+        let custom = DictationSettings(shortcut: Shortcut(keyCode: 2, modifiers: Shortcut.option | Shortcut.command, key: "D"))
+        #expect(DictationSettings.decode(try custom.encoded()) == custom)
+        #expect(DictationSettings.decode(Data(#"{"sounds":false}"#.utf8)).shortcut == .standard)
+        let shiftOnly = #"{"language":"es","shortcut":{"keyCode":2,"modifiers":512,"key":"D"}}"#
+        #expect(DictationSettings.decode(Data(shiftOnly.utf8)) == DictationSettings(language: "es"))
+        let wrongType = #"{"language":"es","shortcut":"ctrl+d"}"#
+        #expect(DictationSettings.decode(Data(wrongType.utf8)) == DictationSettings(language: "es"))
+    }
+}
+
 @Suite("S-010 Dictate with the local model")
 struct LocalModel {
     @Test("whisper-cli prints only the segments, with the voice detector, in the chosen language", arguments: [
