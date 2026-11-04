@@ -94,6 +94,7 @@ enum Snapshot {
                     dictation.settings.shortcut = custom
                     await pause(0.5)
                     capture(to: "\(dir)/settings-custom-\(mode).png", window: services.settingsWindow.nsWindow)
+                    services.settingsWindow.show()   // key again, or recording cancels at once
                     services.shortcutRecorder.start()
                     _ = services.shortcutRecorder.handle(NSEvent.keyEvent(
                         with: .keyDown, location: .zero, modifierFlags: .shift, timestamp: 0, windowNumber: 0, context: nil,

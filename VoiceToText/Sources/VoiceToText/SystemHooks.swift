@@ -204,7 +204,7 @@ final class HotkeyCenter {
     }
 }
 
-/// Settings' "Change…": the next key press with ⌃, ⌥ or ⌘ becomes the
+/// Settings' "Change…": the next key press with ⌃ or ⌥ becomes the
 /// shortcut, saved to settings.json. Escape cancels.
 @Observable
 final class ShortcutRecorder {

@@ -233,7 +233,7 @@ enum SelfTest {
         _ = await agent("settings update", ["language": "auto", "sounds": "true"])
         check("S-008 language auto clears it", dictation.settings.languageCode == nil)
 
-        // S-011 Change the shortcut: the next press with ⌃, ⌥ or ⌘ becomes it, saved to settings.json.
+        // S-011 Change the shortcut: the next press with ⌃ or ⌥ becomes it, saved to settings.json.
         func press(_ keyCode: Int, _ flags: NSEvent.ModifierFlags, _ characters: String) -> NSEvent {
             NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
                              characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
