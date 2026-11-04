@@ -39,11 +39,14 @@ final class SettingsWindow {
         window.title = "VoiceToText Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
-        // Closing the window while it records a shortcut gives the old one back.
+        // Closing the window, or clicking another app, while it records a shortcut gives
+        // the old one back: the local monitor only sees keys while Settings is key.
         // (SwiftUI's onDisappear does not run: the window only orders out.)
         let recorder = services.shortcutRecorder
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
-            MainActor.assumeIsolated { recorder.cancel() }
+        for name in [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { recorder.cancel() }
+            }
         }
         self.window = window
         return window

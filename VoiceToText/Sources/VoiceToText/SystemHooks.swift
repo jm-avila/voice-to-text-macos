@@ -92,6 +92,8 @@ extension Shortcut {
         kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟",
         kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
         kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+        kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15", kVK_F16: "F16", kVK_F17: "F17", kVK_F18: "F18",
+        kVK_F19: "F19", kVK_F20: "F20",
     ]
 
     init(event: NSEvent) {
@@ -102,9 +104,19 @@ extension Shortcut {
         if flags.contains(.shift) { modifiers |= Shortcut.shift }
         if flags.contains(.command) { modifiers |= Shortcut.command }
         // The key's own character, as printed on it (⌥D gives "D", not "∂").
-        let plain = event.characters(byApplyingModifiers: [])?.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters)) ?? ""
-        let key = Self.names[Int(event.keyCode)] ?? (plain.count == 1 ? plain.uppercased() : "")
+        let key = Self.name(keyCode: Int(event.keyCode), plain: event.characters(byApplyingModifiers: []) ?? "")
         self.init(keyCode: UInt32(event.keyCode), modifiers: modifiers, key: key)
+    }
+
+    /// The key as printed on it, from its character with no modifiers. "" when it has no name.
+    static func name(keyCode: Int, plain: String) -> String {
+        if let name = names[keyCode] { return name }
+        let plain = plain.trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        // Other special keys (Help, keypad Clear) give a private-use glyph: no name, so refused.
+        guard plain.count == 1, !plain.unicodeScalars.contains(where: { (0xF700...0xF8FF).contains($0.value) }) else { return "" }
+        // Uppercase unless that changes its length (ß would become SS).
+        let upper = plain.uppercased()
+        return upper.count == 1 ? upper : plain
     }
 
     /// For NSMenuItem.keyEquivalent: printable keys only, "" for the rest (no hint shown).

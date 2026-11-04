@@ -246,8 +246,9 @@ struct ChangeShortcut {
         #expect(Shortcut(keyCode: 2, modifiers: Shortcut.option | 0x0400 | 0x0080, key: "D").modifiers == Shortcut.option)
     }
 
-    @Test("A key needs ⌃, ⌥ or ⌘", arguments: [
-        (UInt32(0), false), (Shortcut.shift, false), (Shortcut.control, true), (Shortcut.option | Shortcut.shift, true), (Shortcut.command, true),
+    @Test("A key needs ⌃ or ⌥: ⇧ or ⌘ alone would take keys from every app", arguments: [
+        (UInt32(0), false), (Shortcut.shift, false), (Shortcut.command, false), (Shortcut.command | Shortcut.shift, false),
+        (Shortcut.control, true), (Shortcut.option | Shortcut.shift, true), (Shortcut.command | Shortcut.option, true),
     ])
     func needsModifier(modifiers: UInt32, ok: Bool) {
         #expect((Shortcut(keyCode: 2, modifiers: modifiers, key: "D").problem == nil) == ok)
@@ -265,6 +266,8 @@ struct ChangeShortcut {
         #expect(DictationSettings.decode(Data(#"{"sounds":false}"#.utf8)).shortcut == .standard)
         let shiftOnly = #"{"language":"es","shortcut":{"keyCode":2,"modifiers":512,"key":"D"}}"#
         #expect(DictationSettings.decode(Data(shiftOnly.utf8)) == DictationSettings(language: "es"))
+        let capsLock = #"{"shortcut":{"keyCode":2,"modifiers":5120,"key":"D"}}"#   // ⌃ + caps lock
+        #expect(DictationSettings.decode(Data(capsLock.utf8)).shortcut.modifiers == Shortcut.control)
         let wrongType = #"{"language":"es","shortcut":"ctrl+d"}"#
         #expect(DictationSettings.decode(Data(wrongType.utf8)) == DictationSettings(language: "es"))
     }

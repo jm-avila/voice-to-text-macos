@@ -243,6 +243,12 @@ enum SelfTest {
         let optionD = Shortcut(keyCode: UInt32(kVK_ANSI_D), modifiers: Shortcut.option | Shortcut.command, key: "D")
         check("S-011 a key press reads as the key printed on it", Shortcut(event: press(kVK_ANSI_D, [.option, .command], "∂")) == optionD,
               Shortcut(event: press(kVK_ANSI_D, [.option, .command], "∂")).symbols)
+        check("S-011 ⌘ alone is refused (⌘W would close windows in every app)",
+              Shortcut(event: press(kVK_ANSI_W, .command, "w")).problem != nil)
+        check("S-011 ß stays one letter, other letters are capitals",
+              Shortcut.name(keyCode: kVK_ANSI_Minus, plain: "ß") == "ß" && Shortcut.name(keyCode: kVK_ANSI_D, plain: "d") == "D")
+        check("S-011 a private-use glyph (Help, keypad Clear) is no name",
+              Shortcut.name(keyCode: kVK_Help, plain: "\u{F746}").isEmpty && Shortcut.name(keyCode: kVK_F13, plain: "\u{F710}") == "F13")
         check("S-011 Space has a name and no menu key",
               Shortcut(event: press(kVK_Space, .control, " ")).symbols == "⌃Space" && Shortcut(event: press(kVK_Space, .control, " ")).menuKey == "")
         check("S-011 a press is ignored until Change is clicked", !shortcuts.handle(press(kVK_ANSI_D, [.option, .command], "d")))

@@ -60,6 +60,9 @@ final class Services {
                 guard let self else { return }
                 Task { await self.dictation.toggle() }
             }
+        } else {
+            // Shows the saved one without registering it.
+            _ = hotkeys.change(to: dictation.settings.shortcut)
         }
         statusItem.refresh()
     }

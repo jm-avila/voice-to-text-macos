@@ -23,6 +23,14 @@ public struct Shortcut: Codable, Equatable, Sendable {
         self.key = key
     }
 
+    /// Through init, so stray bits in a hand-edited file are dropped too.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(keyCode: try container.decode(UInt32.self, forKey: .keyCode),
+                  modifiers: try container.decode(UInt32.self, forKey: .modifiers),
+                  key: try container.decode(String.self, forKey: .key))
+    }
+
     /// In Apple's order: ⌃⌥⇧⌘ then the key.
     public var symbols: String {
         var text = ""
@@ -33,11 +41,12 @@ public struct Shortcut: Codable, Equatable, Sendable {
         return text + key
     }
 
-    /// Why this can't be the shortcut, or nil when it can. A key with only ⇧
-    /// (or nothing) would fire on every capital letter you type.
+    /// Why this can't be the shortcut, or nil when it can. It needs ⌃ or ⌥:
+    /// with only ⇧ it would fire on every capital letter, and ⌘ alone takes
+    /// apps' own shortcuts (⌘W, ⌘Q) away from every app.
     public var problem: String? {
         if key.isEmpty { return "That key can't be a shortcut." }
-        if modifiers & (Self.control | Self.option | Self.command) == 0 { return "Hold ⌃, ⌥ or ⌘ with the key." }
+        if modifiers & (Self.control | Self.option) == 0 { return "Hold ⌃ or ⌥ with the key." }
         return nil
     }
 }
