@@ -314,9 +314,10 @@ enum SelfTest {
         _ = await agent("settings update", ["click-to-dictate": "false", "hide-when-idle": "false"])
         check("S-012 turned off: the menu is back and the icon shows", !icon.clickDictates && icon.isShown)
         // A file dropped on the icon.
-        check("S-012 a drop takes audio and video files only",
+        check("S-012 a drop takes audio, MP4 and QuickTime files only",
               StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.m4a")) && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mp3"))
-                && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mov")) && !StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.txt"))
+                && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mov")) && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mp4"))
+                && !StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mkv")) && !StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.txt"))
                 && !StatusItem.audioFile(URL(string: "https://example.com/a.m4a")!))
         transcriber.reply = .success("From a dropped file.")
         let droppedFile = store.directory.appending(path: "dropped.m4a")

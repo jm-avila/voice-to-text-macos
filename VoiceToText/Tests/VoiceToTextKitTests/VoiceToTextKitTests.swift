@@ -165,6 +165,21 @@ struct Transcriber {
                                  session: URLSession(configuration: config), key: { key })
     }
 
+    @Test("A file over 25 MB is refused by its size, before any request")
+    func tooLarge() async throws {
+        let big = FileManager.default.temporaryDirectory.appending(path: "vtt-big-\(UUID().uuidString).mov")
+        FileManager.default.createFile(atPath: big.path, contents: nil)
+        defer { try? FileManager.default.removeItem(at: big) }
+        let handle = try FileHandle(forWritingTo: big)
+        try handle.truncate(atOffset: UInt64(TranscriptionRequest.maxBytes + 1))   // sparse: no 25 MB written
+        try handle.close()
+        StubProtocol.lastRequest = nil
+        await #expect(throws: TranscriptionError.tooLarge(bytes: TranscriptionRequest.maxBytes + 1)) {
+            try await transcriber().transcribe(big, model: "gpt-4o-transcribe", language: nil)
+        }
+        #expect(StubProtocol.lastRequest == nil)
+    }
+
     @Test("It posts the file with the key and returns one clean line")
     func posts() async throws {
         StubProtocol.reply = (200, Data("Hello\nworld ".utf8))

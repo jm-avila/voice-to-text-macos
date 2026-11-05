@@ -110,8 +110,11 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular),
         ])
         button.appearsDisabled = dictation.state == .starting
-        button.toolTip = tip
-        button.setAccessibilityLabel(tip)
+        // Only on change: redraw runs 10 times a second, and resetting a tooltip hides it.
+        if button.toolTip != tip {
+            button.toolTip = tip
+            button.setAccessibilityLabel(tip)
+        }
         dot.isHidden = !(hasFailureDot && symbolName == "waveform")
         if !dot.isHidden {
             button.layoutSubtreeIfNeeded()
@@ -119,6 +122,8 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             // Top right of the glyph. The status bar button may be flipped.
             let top = button.isFlipped ? 4 : button.bounds.maxY - size - 4
             dot.frame = NSRect(x: button.bounds.maxX - size - 4, y: top, width: size, height: size)
+            // Stays at the top right if the button resizes while it shows.
+            dot.autoresizingMask = [.minXMargin, button.isFlipped ? .maxYMargin : .minYMargin]
         }
     }
 
@@ -200,10 +205,10 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
 
     // MARK: Drop
 
-    /// An audio or video file, the only kind a drop accepts.
+    /// Audio, or an MP4 or QuickTime movie: what both OpenAI and afconvert (the local model) read.
     static func audioFile(_ url: URL) -> Bool {
         guard url.isFileURL, let type = UTType(filenameExtension: url.pathExtension) else { return false }
-        return type.conforms(to: .audiovisualContent)
+        return [UTType.audio, .mpeg4Movie, .quickTimeMovie].contains { type.conforms(to: $0) }
     }
 
     private func droppedFile(_ sender: NSDraggingInfo) -> URL? {

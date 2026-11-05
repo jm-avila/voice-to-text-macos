@@ -99,6 +99,10 @@ public struct OpenAITranscriber: Transcribing {
 
     public func transcribe(_ file: URL, model: String, language: String?) async throws -> String {
         guard let key = key(), !key.isEmpty else { throw TranscriptionError.noKey }
+        // The size first: a dropped 3 GB video must not be read into memory to be refused.
+        if let size = try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > TranscriptionRequest.maxBytes {
+            throw TranscriptionError.tooLarge(bytes: size)
+        }
         guard let audio = try? Data(contentsOf: file), !audio.isEmpty else { throw TranscriptionError.emptyRecording }
         guard audio.count <= TranscriptionRequest.maxBytes else { throw TranscriptionError.tooLarge(bytes: audio.count) }
         let form = TranscriptionRequest(model: model, language: language)
