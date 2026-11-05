@@ -1,53 +1,243 @@
 import AppKit
+import UniformTypeIdentifiers
 import VoiceToTextKit
 
 /// The menu bar icon and its menu. The icon follows the dictation:
-///   waveform        ready
-///   mic, dimmed     the mic is opening: don't talk yet
-///   mic, red        the mic is live
-///   ellipsis        transcribing
-final class StatusItem: NSObject, NSMenuDelegate {
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+///   waveform          ready (a red dot: the last try failed and the menu hasn't been opened since)
+///   mic, dimmed       the mic is opening: don't talk yet
+///   level bars, 0:07  the mic is live: its level and the time. Not a mic, which
+///                     would repeat macOS's orange mic indicator next to it
+///   three dots        transcribing, one lit at a time
+///   checkmark / ✕     for a moment after a paste or copy, or a failure
+/// Settings can make a click dictate (right-click or ⌥-click opens the menu)
+/// and hide the icon while idle. An audio file dropped on it is transcribed and copied.
+final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
+    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let menu = NSMenu()
     private let dictation: Dictation
     private let hotkeys: HotkeyCenter
     private let openSettings: () -> Void
-    /// The symbol on screen, for the self-test.
+    /// What is on screen, for the self-test: an SF Symbol name, or "level" / "dots" for the drawn ones.
     private(set) var symbolName = ""
+    /// The time beside the level bars while recording; "" otherwise.
+    private(set) var title = ""
+    /// The last try failed and the menu hasn't been opened since.
+    var hasFailureDot: Bool { dictation.lastError != nil && dictation.failures > seenFailures }
+    var isShown: Bool { item.isVisible }
+    /// The icon's window, for snapshots.
+    var window: NSWindow? { item.button?.window }
+    var clickDictates: Bool { item.menu == nil }
+    private var seenFailures = 0
+    private var menuIsOpen = false
+    private let dot = NSView()
+    private var timer: Timer?
+    private var timerInterval: TimeInterval?
+    /// Which of the three dots is lit while transcribing.
+    private var frame = 0
 
     init(dictation: Dictation, hotkeys: HotkeyCenter, openSettings: @escaping () -> Void) {
         self.dictation = dictation
         self.hotkeys = hotkeys
         self.openSettings = openSettings
         super.init()
-        let menu = NSMenu()
         menu.delegate = self
         item.menu = menu
+        if let button = item.button {
+            // Used only when a click dictates: with a menu set, a click opens it instead.
+            button.target = self
+            button.action = #selector(clicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            dot.wantsLayer = true
+            dot.layer?.backgroundColor = NSColor.systemRed.cgColor
+            dot.layer?.cornerRadius = Self.dotSize / 2
+            dot.isHidden = true
+            button.addSubview(dot)
+            // Files dropped on the icon reach the window's delegate.
+            button.window?.registerForDraggedTypes([.fileURL])
+            button.window?.delegate = self
+        }
         refresh()
     }
 
+    private static let dotSize: CGFloat = 6
+
+    /// After any change of state, notice, or settings.
     func refresh() {
-        let (name, tip): (String, String) = switch dictation.state {
-        case .idle: ("waveform", "VoiceToText: press \(hotkeys.combo.symbols) to dictate")
-        case .starting: ("mic", "Opening the mic. Wait to talk")
-        case .recording: ("mic.fill", "Recording. Press \(hotkeys.combo.symbols) to stop")
-        case .transcribing: ("ellipsis", "Transcribing")
-        }
-        symbolName = name
+        let settings = dictation.settings
+        if !menuIsOpen { item.menu = settings.clickToDictate ? nil : menu }
+        let busy = dictation.state != .idle || dictation.notice != nil
+        item.isVisible = busy || hasFailureDot || !settings.hideWhenIdle
+        updateTimer()
+        redraw()
+    }
+
+    /// The icon and title. Runs on every timer tick while recording or transcribing.
+    private func redraw() {
         guard let button = item.button else { return }
-        var image = NSImage(systemSymbolName: name, accessibilityDescription: tip)
-        if case .recording = dictation.state {
-            // Red, like a recording light. Not a template, or the menu bar paints it gray.
-            image = image?.withSymbolConfiguration(.init(paletteColors: [.systemRed]))
-            image?.isTemplate = false
-        } else {
+        var image: NSImage?
+        var tip: String
+        title = ""
+        switch (dictation.state, dictation.notice) {
+        case (.idle, .pasted?), (.idle, .copied?):
+            symbolName = "checkmark"
+            tip = "Done"
+        case (.idle, .error?):
+            symbolName = "xmark"
+            tip = "Failed"
+        case (.idle, _):
+            symbolName = "waveform"
+            tip = hasFailureDot ? "VoiceToText: the last try failed. Open the menu" : "VoiceToText: press \(hotkeys.combo.symbols) to dictate"
+        case (.starting, _):
+            symbolName = "mic"
+            tip = "Opening the mic. Wait to talk"
+        case (.recording, _):
+            symbolName = "level"
+            image = Self.levelBars(dictation.recorder.level())
+            title = Elapsed.text(dictation.elapsed)
+            tip = "Recording. Press \(hotkeys.combo.symbols) to stop"
+        case (.transcribing, _):
+            symbolName = "dots"
+            image = Self.dots(lit: frame % 3)
+            tip = "Transcribing"
+        }
+        if image == nil {
+            image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tip)
             image?.isTemplate = true
         }
         button.image = image
+        button.imagePosition = title.isEmpty ? .imageOnly : .imageLeading
+        button.attributedTitle = NSAttributedString(string: title.isEmpty ? "" : " \(title)", attributes: [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.menuBarFont(ofSize: 0).pointSize, weight: .regular),
+        ])
         button.appearsDisabled = dictation.state == .starting
         button.toolTip = tip
+        button.setAccessibilityLabel(tip)
+        dot.isHidden = !(hasFailureDot && symbolName == "waveform")
+        if !dot.isHidden {
+            button.layoutSubtreeIfNeeded()
+            let size = Self.dotSize
+            // Top right of the glyph. The status bar button may be flipped.
+            let top = button.isFlipped ? 4 : button.bounds.maxY - size - 4
+            dot.frame = NSRect(x: button.bounds.maxX - size - 4, y: top, width: size, height: size)
+        }
+    }
+
+    private func updateTimer() {
+        let interval: TimeInterval? = switch dictation.state {
+        case .recording: 0.1
+        case .transcribing: 0.3
+        case .idle, .starting: nil
+        }
+        guard interval != timerInterval else { return }
+        timer?.invalidate()
+        timer = nil
+        timerInterval = interval
+        frame = 0
+        guard let interval else { return }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.frame += 1
+                self.redraw()
+            }
+        }
+        // .common: it keeps ticking while the menu is open.
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
+    }
+
+    /// Five red bars that grow with the input level, like the HUD's meter.
+    static func levelBars(_ level: Float) -> NSImage {
+        let weights: [CGFloat] = [0.45, 0.75, 1, 0.75, 0.45]
+        let size = NSSize(width: 16, height: 16)
+        let image = NSImage(size: size, flipped: false) { rect in
+            NSColor.systemRed.setFill()
+            for (index, weight) in weights.enumerated() {
+                let height = max(3, (CGFloat(max(0, min(1, level))) * rect.height * weight).rounded())
+                let bar = NSRect(x: 1 + CGFloat(index) * 3, y: (rect.height - height) / 2, width: 2, height: height)
+                NSBezierPath(roundedRect: bar, xRadius: 1, yRadius: 1).fill()
+            }
+            return true
+        }
+        // Not a template, or the menu bar paints it gray.
+        image.isTemplate = false
+        return image
+    }
+
+    /// Three dots with one lit, in the menu bar's own color.
+    static func dots(lit: Int) -> NSImage {
+        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            for index in 0..<3 {
+                NSColor.black.withAlphaComponent(index == lit ? 1 : 0.3).setFill()
+                NSBezierPath(ovalIn: NSRect(x: CGFloat(index) * 6, y: rect.midY - 2, width: 4, height: 4)).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
+    }
+
+    // MARK: Click
+
+    @objc private func clicked() {
+        let event = NSApp.currentEvent
+        let wantsMenu = event?.type == .rightMouseUp || event?.modifierFlags.contains(.option) == true
+            || event?.modifierFlags.contains(.control) == true
+        switch dictation.state {
+        case .idle where !wantsMenu, .recording where !wantsMenu:
+            Task { await dictation.toggle() }
+        default:
+            // Also while the mic opens or it transcribes: the menu can cancel.
+            showMenu()
+        }
+    }
+
+    private func showMenu() {
+        item.menu = menu
+        item.button?.performClick(nil)   // returns when the menu closes
+        item.menu = dictation.settings.clickToDictate ? nil : menu
+    }
+
+    // MARK: Drop
+
+    /// An audio or video file, the only kind a drop accepts.
+    static func audioFile(_ url: URL) -> Bool {
+        guard url.isFileURL, let type = UTType(filenameExtension: url.pathExtension) else { return false }
+        return type.conforms(to: .audiovisualContent)
+    }
+
+    private func droppedFile(_ sender: NSDraggingInfo) -> URL? {
+        let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        guard dictation.state == .idle, let urls, urls.count == 1, let url = urls.first, Self.audioFile(url) else { return nil }
+        return url
+    }
+
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        droppedFile(sender) == nil ? [] : .copy
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingEntered(sender)
+    }
+
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard let url = droppedFile(sender) else { return false }
+        Task { _ = try? await dictation.transcribeDropped(url) }
+        return true
     }
 
     // MARK: Menu
+
+    func menuWillOpen(_ menu: NSMenu) {
+        menuIsOpen = true
+        seenFailures = dictation.failures
+        dot.isHidden = true
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        menuIsOpen = false
+        refresh()
+    }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()

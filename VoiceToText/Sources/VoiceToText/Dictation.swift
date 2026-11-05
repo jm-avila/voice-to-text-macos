@@ -114,8 +114,14 @@ final class Dictation {
     private(set) var history: [HistoryEntry]
     /// The last recording failed to transcribe and is still on disk.
     private(set) var canRetry = false
+    /// How many tries failed so far. The menu bar dot shows until the menu opens after one.
+    private(set) var failures = 0
     var settings: DictationSettings {
-        didSet { if settings != oldValue { store.save(settings) } }
+        didSet {
+            guard settings != oldValue else { return }
+            store.save(settings)
+            onChange()   // the menu bar icon follows clickToDictate and hideWhenIdle
+        }
     }
 
     @ObservationIgnored let store: Store
@@ -220,6 +226,28 @@ final class Dictation {
         try await transcriber.transcribe(file, model: settings.model, language: settings.languageCode)
     }
 
+    /// A file dropped on the menu bar icon: transcribed, saved to history, and copied.
+    func transcribeDropped(_ file: URL) async throws -> String {
+        guard state == .idle else { throw DictationError.busy(state.name) }
+        update(.transcribing)
+        let text: String
+        do {
+            text = try await transcriber.transcribe(file, model: settings.model, language: settings.languageCode)
+        } catch {
+            fail(error)
+            throw error
+        }
+        lastError = nil
+        guard !text.isEmpty else {
+            update(.idle, notice: .nothingHeard)
+            return ""
+        }
+        save(text)
+        paster.copy(text)
+        update(.idle, notice: .copied)
+        return text
+    }
+
     /// Reads history.md again: the bash tool or a person may have changed it.
     /// The menu, Settings, and `vtt history list` call it before they show it.
     func reloadHistory() {
@@ -247,13 +275,7 @@ final class Dictation {
             update(.idle, notice: .nothingHeard)
             return ""
         }
-        let now = Date.now
-        do {
-            try store.appendHistory(text, at: now)
-            history.append(HistoryEntry(date: HistoryLog.stamp(now), text: text))
-        } catch {
-            lastError = "Could not save to history: \(error.localizedDescription)"
-        }
+        save(text)
         if paste {
             let pasted = await paster.paste(text)
             update(.idle, notice: pasted ? .pasted : .copied)
@@ -263,9 +285,20 @@ final class Dictation {
         return text
     }
 
+    private func save(_ text: String) {
+        let now = Date.now
+        do {
+            try store.appendHistory(text, at: now)
+            history.append(HistoryEntry(date: HistoryLog.stamp(now), text: text))
+        } catch {
+            lastError = "Could not save to history: \(error.localizedDescription)"
+        }
+    }
+
     private func fail(_ error: Error) {
         let message = error.localizedDescription
         lastError = message
+        failures += 1
         update(.idle, notice: .error(message))
     }
 

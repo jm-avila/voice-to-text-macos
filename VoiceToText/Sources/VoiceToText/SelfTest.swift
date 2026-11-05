@@ -60,7 +60,8 @@ enum SelfTest {
         await starting.value
         check("S-002 once the mic is live, it records", dictation.state.name == "recording")
         check("S-002 Tink plays when the mic is live", dictation.sounds.lastCue == .start)
-        check("S-002 the menu bar shows a red mic", services.statusItem.symbolName == "mic.fill")
+        check("S-012 the menu bar shows the level and the time, not a mic",
+              services.statusItem.symbolName == "level" && services.statusItem.title.hasPrefix("0:0"))
         let hud = services.hud.window
         check("the HUD never takes focus or clicks", hud?.canBecomeKey == false && hud?.canBecomeMain == false
                 && hud?.styleMask.contains(.nonactivatingPanel) == true && hud?.ignoresMouseEvents == true)
@@ -70,19 +71,22 @@ enum SelfTest {
         await wait(0.1)
         check("S-002 the second press transcribes", dictation.state == .transcribing)
         check("S-002 Pop plays on the second press", dictation.sounds.lastCue == .stop)
-        check("S-002 the menu bar shows an ellipsis", services.statusItem.symbolName == "ellipsis")
+        check("S-012 the menu bar shows dots while transcribing", services.statusItem.symbolName == "dots"
+                && services.statusItem.title.isEmpty)
         await dictation.toggle()
         check("S-003 a press while transcribing is ignored", dictation.state == .transcribing)
         await stopping.value
         check("S-001 the text is pasted", paster.last?.text == "Hello from the self-test." && paster.last?.pasted == true)
         check("S-004 the text stays on the clipboard", paster.pasteboard.string(forType: .string) == "Hello from the self-test.")
         check("S-001 the HUD says Pasted", dictation.notice == .pasted && services.hud.isVisible)
-        check("S-001 back to ready", dictation.state == .idle && services.statusItem.symbolName == "waveform")
+        check("S-012 the menu bar flashes a checkmark after the paste", services.statusItem.symbolName == "checkmark")
+        check("S-001 back to ready", dictation.state == .idle)
         check("the transcriber got the recording, the model, and no language",
               transcriber.calls.last?.file == store.recordingURL && transcriber.calls.last?.model == "gpt-4o-transcribe"
                 && transcriber.calls.last?.language == nil)
         await wait(1.5)
         check("the HUD hides after the notice", !services.hud.isVisible)
+        check("S-012 then the waveform, with no failure dot", services.statusItem.symbolName == "waveform" && !services.statusItem.hasFailureDot)
 
         // S-005 History, in the bash tool's format.
         let entries = HistoryLog.parse(historyFile())
@@ -274,8 +278,59 @@ enum SelfTest {
         await wait(0.2)
         check("S-011 closing Settings stops recording", !shortcuts.isRecording)
 
+        // S-012 The menu bar icon.
+        let icon: StatusItem = services.statusItem
+        transcriber.reply = .failure(TranscriptionError.api(status: 500, message: "Server down"))
+        try? await dictation.start()
+        _ = try? await dictation.stop(paste: true)
+        check("S-012 a failure flashes ✕, then leaves a dot", icon.symbolName == "xmark" && icon.hasFailureDot)
+        icon.menuWillOpen(NSMenu())
+        icon.menuDidClose(NSMenu())
+        check("S-012 opening the menu clears the dot", !icon.hasFailureDot)
+        transcriber.reply = .success("Back.")
+        try? await dictation.start()
+        _ = try? await dictation.stop(paste: true)
+        check("S-012 a good try after a failure has no dot", !icon.hasFailureDot && dictation.lastError == nil)
+        await wait(1.5)
+        check("S-012 the icon shows by default, and a click opens the menu", icon.isShown && !icon.clickDictates)
+        let menuSettings = result(await agent("settings update", ["click-to-dictate": "true", "hide-when-idle": "true"]))
+        check("S-012 settings update turns on click to dictate and hide when idle",
+              menuSettings?["clickToDictate"] as? Bool == true && dictation.settings.hideWhenIdle
+                && Store(directory: store.directory).loadSettings().clickToDictate)
+        check("S-012 a click dictates, and the idle icon hides", icon.clickDictates && !icon.isShown)
+        try? await dictation.start()
+        check("S-012 the hidden icon shows while recording", icon.isShown)
+        await dictation.cancel()
+        await wait(1.5)
+        check("S-012 and hides again after", !icon.isShown)
+        transcriber.reply = .failure(TranscriptionError.api(status: 500, message: "Server down"))
+        try? await dictation.start()
+        _ = try? await dictation.stop(paste: true)
+        await wait(4.5)
+        check("S-012 a failure keeps the hidden icon shown, with its dot", icon.isShown && icon.hasFailureDot)
+        icon.menuWillOpen(NSMenu())
+        icon.menuDidClose(NSMenu())
+        check("S-012 opening the menu hides it again", !icon.isShown)
+        _ = await agent("settings update", ["click-to-dictate": "false", "hide-when-idle": "false"])
+        check("S-012 turned off: the menu is back and the icon shows", !icon.clickDictates && icon.isShown)
+        // A file dropped on the icon.
+        check("S-012 a drop takes audio and video files only",
+              StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.m4a")) && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mp3"))
+                && StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.mov")) && !StatusItem.audioFile(URL(fileURLWithPath: "/tmp/a.txt"))
+                && !StatusItem.audioFile(URL(string: "https://example.com/a.m4a")!))
+        transcriber.reply = .success("From a dropped file.")
+        let droppedFile = store.directory.appending(path: "dropped.m4a")
+        try? Data("memo".utf8).write(to: droppedFile)
+        paster.pasteboard.clearContents()
+        let dropped = try? await dictation.transcribeDropped(droppedFile)
+        check("S-012 a dropped file is transcribed, saved, and copied, not pasted",
+              dropped == "From a dropped file." && transcriber.calls.last?.file == droppedFile
+                && dictation.history.last?.text == "From a dropped file." && dictation.notice == .copied
+                && paster.pasteboard.string(forType: .string) == "From a dropped file.")
+        await wait(1.5)
+
         // Every SF Symbol the app uses exists.
-        let symbols = ["waveform", "mic", "mic.fill", "ellipsis", "checkmark.circle.fill", "doc.on.clipboard", "ear",
+        let symbols = ["waveform", "mic", "mic.fill", "checkmark", "xmark", "checkmark.circle.fill", "doc.on.clipboard", "ear",
                        "xmark.circle", "xmark.circle.fill", "exclamationmark.triangle.fill"]
         let missingSymbols = symbols.filter { NSImage(systemSymbolName: $0, accessibilityDescription: nil) == nil }
         check("every SF Symbol exists", missingSymbols.isEmpty, missingSymbols.joined(separator: ", "))
