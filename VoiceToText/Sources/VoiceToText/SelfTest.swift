@@ -269,6 +269,28 @@ enum SelfTest {
               !shortcuts.isRecording && shortcuts.problem == nil && services.hotkeys.combo == optionD
                 && Store(directory: store.directory).loadSettings().shortcut == optionD)
         check("S-011 status reports the new shortcut", result(await agent("status"))?["shortcut"] as? String == "⌥⌘D")
+        func flags(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(kVK_Option))!
+        }
+        shortcuts.start()
+        _ = shortcuts.handle(flags(.option))
+        _ = shortcuts.handle(flags([]))
+        check("S-011 one modifier let go is not a shortcut yet", shortcuts.isRecording && shortcuts.problem == nil)
+        _ = shortcuts.handle(flags([.shift, .command]))
+        _ = shortcuts.handle(flags([]))
+        check("S-011 ⇧⌘ alone is refused and recording goes on", shortcuts.isRecording && shortcuts.problem != nil)
+        _ = shortcuts.handle(flags(.option))
+        _ = shortcuts.handle(flags([.option, .command]))
+        _ = shortcuts.handle(press(kVK_ANSI_D, [.option, .command], "d"))
+        check("S-011 a key with the modifiers beats modifiers alone", services.hotkeys.combo == optionD && !shortcuts.isRecording)
+        let optionCommand = Shortcut.modifiersOnly(Shortcut.option | Shortcut.command)
+        shortcuts.start()
+        for held: NSEvent.ModifierFlags in [.option, [.option, .command], .command, []] { _ = shortcuts.handle(flags(held)) }
+        check("S-011 ⌥⌘ pressed and let go becomes the shortcut, saved",
+              !shortcuts.isRecording && services.hotkeys.combo == optionCommand
+                && Store(directory: store.directory).loadSettings().shortcut == optionCommand)
+        check("S-011 status reports ⌥⌘", result(await agent("status"))?["shortcut"] as? String == "⌥⌘")
         shortcuts.reset()
         check("S-011 Reset goes back to ⌃.", services.hotkeys.combo == .standard
                 && Store(directory: store.directory).loadSettings().shortcut == .standard)

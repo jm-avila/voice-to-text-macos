@@ -288,6 +288,47 @@ struct ChangeShortcut {
         let wrongType = #"{"language":"es","shortcut":"ctrl+d"}"#
         #expect(DictationSettings.decode(Data(wrongType.utf8)) == DictationSettings(language: "es"))
     }
+
+    @Test("Modifiers alone: two of them, with ⌃ or ⌥, shown with no key, saved")
+    func modifiersOnly() throws {
+        let optionCommand = Shortcut.modifiersOnly(Shortcut.option | Shortcut.command)
+        #expect(optionCommand.isModifiersOnly && optionCommand.symbols == "⌥⌘" && optionCommand.problem == nil)
+        #expect(!Shortcut.standard.isModifiersOnly)
+        #expect(Shortcut.modifiersOnly(Shortcut.option).problem != nil)
+        #expect(Shortcut.modifiersOnly(Shortcut.command | Shortcut.shift).problem != nil)
+        let saved = DictationSettings(shortcut: optionCommand)
+        #expect(DictationSettings.decode(try saved.encoded()).shortcut == optionCommand)
+    }
+
+    static let optionCommand = Shortcut.option | Shortcut.command
+
+    /// Feeds a ⌥⌘ tap the held modifiers in turn (nil: a key or click) and gives the indexes where it fired.
+    static func fires(_ steps: [UInt32?]) -> [Int] {
+        var tap = ModifierTap(optionCommand)
+        return steps.indices.filter { index in
+            guard let held = steps[index] else { tap.otherInput(); return false }
+            return tap.changed(to: held)
+        }
+    }
+
+    @Test("A ⌥⌘ tap fires when both are let go, in any order")
+    func tapFires() {
+        #expect(Self.fires([Shortcut.option, Self.optionCommand, Shortcut.command, 0,
+                            Shortcut.command, Self.optionCommand, Shortcut.option, 0]) == [3, 7])
+    }
+
+    @Test("A key, a click, or an extra modifier while held spoils the tap; the next one works")
+    func tapSpoiled() {
+        #expect(Self.fires([Self.optionCommand, nil, 0,   // ⌥⌘I
+                            Self.optionCommand, Self.optionCommand | Shortcut.shift, Self.optionCommand, 0,
+                            nil,   // typing with nothing held spoils nothing
+                            Self.optionCommand, 0]) == [9])
+    }
+
+    @Test("Only one of the two, or a key first, never fires")
+    func tapPartial() {
+        #expect(Self.fires([Shortcut.option, 0, Shortcut.option, nil, Self.optionCommand, 0]) == [])
+    }
 }
 
 @Suite("S-010 Dictate with the local model")

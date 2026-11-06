@@ -25,7 +25,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - The OpenAI key: env `OPENAI_API_KEY`, else Keychain through `/usr/bin/security` (account `agent-secrets`, service `OPENAI_API_KEY`).
 - The local model: `models/ggml-large-v3-turbo.bin` and `models/ggml-silero-v5.1.2.bin` in the real store, even with `APP_STORE` (one 1.6 GB copy). `tools/get-model.sh` gets them and whisper.cpp.
 - `APP_STORE=<folder>` moves the store. A copy started with it never takes the global shortcut.
-- The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it.
+- The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it. Modifiers alone (⌥⌘, key code `0xFFFF`) fire on release with no key or click between (`ModifierTap`); they use event monitors, so they need Accessibility.
 
 ## Build and check
 

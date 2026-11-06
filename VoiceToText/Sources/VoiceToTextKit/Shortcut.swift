@@ -2,7 +2,8 @@ import Foundation
 
 /// The dictation shortcut: a key and modifiers in Carbon terms (what
 /// RegisterEventHotKey takes), plus the key as printed, so Settings and the
-/// menu can show it without a keyboard layout lookup.
+/// menu can show it without a keyboard layout lookup. Or modifiers alone
+/// (⌥⌘), pressed and let go with no key between.
 public struct Shortcut: Codable, Equatable, Sendable {
     // Carbon's modifier bits (cmdKey, shiftKey, optionKey, controlKey), here so the Kit needs no Carbon.
     public static let command: UInt32 = 0x0100
@@ -12,6 +13,13 @@ public struct Shortcut: Codable, Equatable, Sendable {
 
     /// ⌃. : kVK_ANSI_Period with Control.
     public static let standard = Shortcut(keyCode: 0x2F, modifiers: control, key: ".")
+    /// The key code of a shortcut with no key. No real key has it.
+    public static let noKey: UInt32 = 0xFFFF
+
+    /// Modifiers alone, like ⌥⌘.
+    public static func modifiersOnly(_ modifiers: UInt32) -> Shortcut {
+        Shortcut(keyCode: noKey, modifiers: modifiers, key: "")
+    }
 
     public var keyCode: UInt32
     public var modifiers: UInt32
@@ -31,6 +39,8 @@ public struct Shortcut: Codable, Equatable, Sendable {
                   key: try container.decode(String.self, forKey: .key))
     }
 
+    public var isModifiersOnly: Bool { keyCode == Self.noKey }
+
     /// In Apple's order: ⌃⌥⇧⌘ then the key.
     public var symbols: String {
         var text = ""
@@ -43,10 +53,41 @@ public struct Shortcut: Codable, Equatable, Sendable {
 
     /// Why this can't be the shortcut, or nil when it can. It needs ⌃ or ⌥:
     /// with only ⇧ it would fire on every capital letter, and ⌘ alone takes
-    /// apps' own shortcuts (⌘W, ⌘Q) away from every app.
+    /// apps' own shortcuts (⌘W, ⌘Q) away from every app. Modifiers alone
+    /// need two, so a lone ⌥ tap doesn't start dictating.
     public var problem: String? {
-        if key.isEmpty { return "That key can't be a shortcut." }
+        if isModifiersOnly {
+            if modifiers.nonzeroBitCount < 2 { return "Hold two modifiers, or add a key." }
+        } else if key.isEmpty { return "That key can't be a shortcut." }
         if modifiers & (Self.control | Self.option) == 0 { return "Hold ⌃ or ⌥ with the key." }
         return nil
+    }
+}
+
+/// Watches modifier changes for a modifiers-only shortcut. It fires when the
+/// modifiers go back to none after being exactly the shortcut's, with no key,
+/// click, or extra modifier in between, so ⌥⌘I and ⌥⌘-click still reach apps.
+public struct ModifierTap: Sendable {
+    public let modifiers: UInt32
+    private var held: UInt32 = 0
+    private var reached = false
+    private var spoiled = false
+
+    public init(_ modifiers: UInt32) { self.modifiers = modifiers }
+
+    /// The modifiers now held. True when the tap is done: fire.
+    public mutating func changed(to now: UInt32) -> Bool {
+        held = now
+        if now == 0 {
+            defer { reached = false; spoiled = false }
+            return reached && !spoiled
+        }
+        if now & ~modifiers != 0 { spoiled = true } else if now == modifiers { reached = true }
+        return false
+    }
+
+    /// A key or click. Spoils the tap if modifiers are held.
+    public mutating func otherInput() {
+        if held != 0 { spoiled = true }
     }
 }
