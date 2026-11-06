@@ -46,6 +46,10 @@ enum SelfTest {
         func wait(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
         func historyFile() -> String { (try? String(contentsOf: store.historyURL, encoding: .utf8)) ?? "" }
         paster.canPaste = { true }
+        // The test copy's own grants don't matter: S-013 turns them off on purpose.
+        let permissions = services.permissions
+        permissions.accessibility = true
+        permissions.microphone = .granted
 
         // S-001 Press, talk, press: the text is pasted where the cursor is.
         recorder.startDelay = .milliseconds(300)
@@ -351,6 +355,34 @@ enum SelfTest {
                 && dictation.history.last?.text == "From a dropped file." && dictation.notice == .copied
                 && paster.pasteboard.string(forType: .string) == "From a dropped file.")
         await wait(1.5)
+
+        // S-013 Missing access is asked for up front and shown, never found out after talking.
+        permissions.accessibility = false
+        let menu = NSMenu()
+        icon.menuNeedsUpdate(menu)
+        let fixItem = menu.items.first { $0.title == Permissions.Need.accessibility.menuTitle }
+        check("S-013 the menu offers to allow Accessibility, first", fixItem != nil && menu.items.firstIndex { $0 === fixItem } ?? 99 < 3)
+        icon.refresh()
+        check("S-013 the icon keeps a dot and says what is missing", icon.needsAccess && icon.isShown)
+        services.settingsWindow.close()
+        let blockedFrom = transcriber.calls.count
+        await dictation.toggle()
+        check("S-013 the shortcut opens Settings instead of recording", dictation.state == .idle
+                && services.settingsWindow.isVisible && transcriber.calls.count == blockedFrom)
+        try? await dictation.start()
+        check("S-013 the CLI still records (it pastes nothing)", dictation.state.name == "recording")
+        await dictation.cancel()
+        permissions.accessibility = true
+        permissions.microphone = .denied
+        check("S-013 a denied mic opens System Settings", permissions.missing == [.microphone] && permissions.fixTitle(.microphone) == "Open Settings")
+        permissions.microphone = .granted
+        icon.menuNeedsUpdate(menu)
+        check("S-013 all allowed: no warning, and the shortcut records", !icon.needsAccess
+                && !menu.items.contains { $0.title == Permissions.Need.accessibility.menuTitle })
+        await dictation.toggle()
+        check("S-013 with everything allowed the shortcut records", dictation.state.name == "recording")
+        await dictation.cancel()
+        services.settingsWindow.close()
 
         // Every SF Symbol the app uses exists.
         let symbols = ["waveform", "mic", "mic.fill", "checkmark", "xmark", "checkmark.circle.fill", "doc.on.clipboard", "ear",

@@ -103,3 +103,12 @@ Acceptance:
 - [snap] `menubar-<state>` shots for every state, with the dot.
 - [manual] A real click, right-click, ⌥-click and a file drag on the icon.
 Status: done
+
+### S-013 Know what's missing before dictating
+As the user, I learn at launch that the mic or Accessibility is missing, with a button to allow it, instead of finding out after I talked.
+Screens: settings, menu
+Acceptance:
+- [self] Missing access shows first in the menu with a fix, keeps a dot on the icon, and the shortcut opens Settings instead of recording; the CLI still records; all allowed, no warning.
+- [snap] Settings starts with "Needed before you dictate", one row per missing permission with its button.
+- [manual] Launch asks for the mic and opens Settings; allowing Accessibility makes ⌥⌘ work without a restart.
+Status: done

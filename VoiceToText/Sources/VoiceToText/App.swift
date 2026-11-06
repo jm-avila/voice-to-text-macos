@@ -28,10 +28,15 @@ final class Services {
         hud = RecordingHUD(dictation: dictation)
         shortcutRecorder = ShortcutRecorder(hotkeys: hotkeys, dictation: dictation)
         settingsWindow = SettingsWindow { [unowned self] in self }
-        statusItem = StatusItem(dictation: dictation, hotkeys: hotkeys) { [unowned self] in settingsWindow.show() }
+        statusItem = StatusItem(dictation: dictation, hotkeys: hotkeys, permissions: permissions) { [unowned self] in settingsWindow.show() }
         dictation.onChange = { [unowned self] in
             hud.refresh()
             statusItem.refresh()
+        }
+        dictation.blocked = { [unowned self] in
+            guard !permissions.missing.isEmpty else { return false }
+            settingsWindow.show()
+            return true
         }
     }
 
@@ -54,6 +59,11 @@ final class Services {
 
     func start() {
         permissions.startPolling()
+        permissions.onChange = { [unowned self] in
+            // Monitors added before Accessibility see nothing: add them again.
+            if permissions.accessibility, !hotkeys.isRegistered { hotkeys.retry() }
+            statusItem.refresh()
+        }
         // A test copy (APP_STORE) never takes the global shortcut from the real app.
         if !Store.isOverridden {
             hotkeys.register(dictation.settings.shortcut) { [weak self] in
@@ -65,6 +75,9 @@ final class Services {
             _ = hotkeys.change(to: dictation.settings.shortcut)
         }
         statusItem.refresh()
+        // Ask up front, not on the first dictation: macOS's mic prompt, then Settings with what is missing.
+        if permissions.microphone == .notAsked { Task { _ = await permissions.requestMicrophone() } }
+        if !permissions.missing.isEmpty { settingsWindow.show() }
     }
 }
 

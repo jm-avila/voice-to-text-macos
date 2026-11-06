@@ -131,6 +131,9 @@ final class Dictation {
     @ObservationIgnored let sounds = Sounds()
     /// Runs after every change of state or notice: the status item and HUD redraw.
     @ObservationIgnored var onChange: () -> Void = {}
+    /// True when the hotkey, the menu, or a click must not start: the mic or
+    /// paste is missing. It shows the person what to allow instead. The CLI skips it.
+    @ObservationIgnored var blocked: () -> Bool = { false }
     @ObservationIgnored private var cancelRequested = false
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// A cancel still stopping the recorder. The next start waits for it.
@@ -153,7 +156,7 @@ final class Dictation {
     /// while the mic opens or while transcribing are ignored.
     func toggle() async {
         switch state {
-        case .idle: try? await start()
+        case .idle: if !blocked() { try? await start() }
         case .recording: _ = try? await stop(paste: true)
         case .starting, .transcribing: break
         }

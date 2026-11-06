@@ -30,8 +30,41 @@ final class Permissions {
         case granted, notAsked, denied
     }
 
-    private(set) var accessibility = AXIsProcessTrusted()
-    private(set) var microphone = Permissions.readMicrophone()
+    /// What dictating needs and doesn't have yet. Asked for at launch, shown
+    /// at the top of Settings and the menu, each with a button that fixes it.
+    enum Need: String, CaseIterable, Identifiable {
+        case microphone, accessibility
+        var id: String { rawValue }
+        var title: String { self == .microphone ? "Microphone" : "Accessibility" }
+        var why: String {
+            self == .microphone ? "To hear you. Without it nothing is recorded."
+                                : "To paste where you type, and for a shortcut of modifiers alone."
+        }
+        var menuTitle: String { self == .microphone ? "Allow the Microphone…" : "Allow Accessibility to Paste…" }
+    }
+
+    // Set only by polling, and by the self-test (which never polls).
+    var accessibility = AXIsProcessTrusted()
+    var microphone = Permissions.readMicrophone()
+    /// After accessibility or the microphone changes.
+    @ObservationIgnored var onChange: () -> Void = {}
+
+    var missing: [Need] {
+        Need.allCases.filter { $0 == .microphone ? microphone != .granted : !accessibility }
+    }
+
+    /// The button's title for a need: macOS asks once, then only System Settings can change it.
+    func fixTitle(_ need: Need) -> String {
+        need == .microphone && microphone == .denied ? "Open Settings" : "Allow"
+    }
+
+    func fix(_ need: Need) {
+        switch need {
+        case .microphone where microphone == .notAsked: Task { _ = await requestMicrophone() }
+        case .microphone: openPane("Privacy_Microphone")
+        case .accessibility: requestAccessibility()
+        }
+    }
     /// Polled too, so Settings shows "Downloaded" once tools/get-model.sh finishes.
     private(set) var localModel = LocalWhisper.status
     @ObservationIgnored private var timer: Timer?
@@ -47,9 +80,11 @@ final class Permissions {
 
     func refresh() {
         let trusted = AXIsProcessTrusted()
-        if trusted != accessibility { accessibility = trusted }
         let mic = Self.readMicrophone()
+        let changed = trusted != accessibility || mic != microphone
+        if trusted != accessibility { accessibility = trusted }
         if mic != microphone { microphone = mic }
+        if changed { onChange() }
         let local = LocalWhisper.status
         if local != localModel { localModel = local }
     }

@@ -3,7 +3,8 @@ import UniformTypeIdentifiers
 import VoiceToTextKit
 
 /// The menu bar icon and its menu. The icon follows the dictation:
-///   waveform          ready (a red dot: the last try failed and the menu hasn't been opened since)
+///   waveform          ready (a red dot: the last try failed and the menu hasn't been opened since,
+///                     or the mic or Accessibility is missing)
 ///   mic, dimmed       the mic is opening: don't talk yet
 ///   level bars, 0:07  the mic is live: its level and the time. Not a mic, which
 ///                     would repeat macOS's orange mic indicator next to it
@@ -16,6 +17,7 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
     private let menu = NSMenu()
     private let dictation: Dictation
     private let hotkeys: HotkeyCenter
+    private let permissions: Permissions
     private let openSettings: () -> Void
     /// What is on screen, for the self-test: an SF Symbol name, or "level" / "dots" for the drawn ones.
     private(set) var symbolName = ""
@@ -23,6 +25,8 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
     private(set) var title = ""
     /// The last try failed and the menu hasn't been opened since.
     var hasFailureDot: Bool { dictation.lastError != nil && dictation.failures > seenFailures }
+    /// The mic or Accessibility is missing. The dot stays until it is allowed.
+    var needsAccess: Bool { !permissions.missing.isEmpty }
     var isShown: Bool { item.isVisible }
     /// The icon's window, for snapshots.
     var window: NSWindow? { item.button?.window }
@@ -35,8 +39,9 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
     /// Which of the three dots is lit while transcribing.
     private var frame = 0
 
-    init(dictation: Dictation, hotkeys: HotkeyCenter, openSettings: @escaping () -> Void) {
+    init(dictation: Dictation, hotkeys: HotkeyCenter, permissions: Permissions, openSettings: @escaping () -> Void) {
         self.dictation = dictation
+        self.permissions = permissions
         self.hotkeys = hotkeys
         self.openSettings = openSettings
         super.init()
@@ -66,7 +71,7 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
         let settings = dictation.settings
         if !menuIsOpen { item.menu = settings.clickToDictate ? nil : menu }
         let busy = dictation.state != .idle || dictation.notice != nil
-        item.isVisible = busy || hasFailureDot || !settings.hideWhenIdle
+        item.isVisible = busy || hasFailureDot || needsAccess || !settings.hideWhenIdle
         updateTimer()
         redraw()
     }
@@ -86,7 +91,8 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             tip = "Failed"
         case (.idle, _):
             symbolName = "waveform"
-            tip = hasFailureDot ? "VoiceToText: the last try failed. Open the menu" : "VoiceToText: press \(hotkeys.combo.symbols) to dictate"
+            tip = needsAccess ? "VoiceToText needs \(permissions.missing.map(\.title).joined(separator: " and ")). Open the menu"
+                : hasFailureDot ? "VoiceToText: the last try failed. Open the menu" : "VoiceToText: press \(hotkeys.combo.symbols) to dictate"
         case (.starting, _):
             symbolName = "mic"
             tip = "Opening the mic. Wait to talk"
@@ -115,7 +121,7 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             button.toolTip = tip
             button.setAccessibilityLabel(tip)
         }
-        dot.isHidden = !(hasFailureDot && symbolName == "waveform")
+        dot.isHidden = !((hasFailureDot || needsAccess) && symbolName == "waveform")
         if !dot.isHidden {
             button.layoutSubtreeIfNeeded()
             let size = Self.dotSize
@@ -249,11 +255,22 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
         dictation.reloadHistory()
         let combo = hotkeys.combo
         let shortcut = combo.symbols
+        let missing = permissions.missing
+        if !missing.isEmpty {
+            menu.addItem(.sectionHeader(title: "Needed before you dictate"))
+            for need in missing {
+                let item = action(need.menuTitle) { [permissions] in permissions.fix(need) }
+                item.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+                item.toolTip = need.why
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
         menu.addItem(.sectionHeader(title: headline))
         switch dictation.state {
         case .idle:
             menu.addItem(action("Start Dictation", key: combo.menuKey, modifiers: combo.menuModifiers) { [dictation] in
-                Task { try? await dictation.start() }
+                Task { await dictation.toggle() }
             })
             if dictation.canRetry {
                 menu.addItem(action("Retry Last Recording") { [dictation] in
