@@ -98,8 +98,17 @@ final class Permissions {
         return microphone == .granted
     }
 
-    /// Shows the system prompt and opens the Accessibility pane.
+    /// Shows the system prompt and opens the Accessibility pane. Clears this
+    /// app's entry first: an ad hoc build's grant names its code hash, so after a
+    /// rebuild the old switch shows on and does nothing, and can't be turned on.
     func requestAccessibility() {
+        if let id = Bundle.main.bundleIdentifier {
+            let reset = Process()
+            reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            reset.arguments = ["reset", "Accessibility", id]
+            try? reset.run()
+            reset.waitUntilExit()
+        }
         // The key's value, kAXTrustedCheckOptionPrompt, as a literal: the C global is not concurrency-safe.
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         openPane("Privacy_Accessibility")
