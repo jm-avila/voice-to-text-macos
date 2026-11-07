@@ -26,10 +26,10 @@ If the app is closed, the command opens it in the background.
 | `vtt status --json` | state (idle, starting, recording, transcribing), model, language, key/mic/Accessibility, history count, last error |
 | `vtt transcribe <file> --json` | `{"text": ...}` for an m4a, mp3, wav, … with the current model and language. Not saved |
 | `vtt start --json` | Opens the mic and returns once it is live: speech before that is lost |
-| `vtt stop --json` | Stops, transcribes, saves to history: `{"text", "saved"}`. `--paste` also pastes into the front app |
+| `vtt stop --json` | Stops, transcribes, saves to history: `{"text", "saved", "streamed", "latencyMs"}` (key-up to text; `streamed`: the local model transcribed it while it was spoken). `--paste` also pastes into the front app |
 | `vtt cancel --json` | Stops recording and throws the audio away |
 | `vtt history list --limit N --json` | Past transcripts, newest first: `{"entries": [{date, text}], "total", "file"}` |
 | `vtt settings update [--model M] [--language es\|auto] [--sounds true\|false] --json` | Only the options given change |
 
-Models: `gpt-4o-transcribe` (default), `gpt-4o-mini-transcribe`, `whisper-1` (OpenAI), and `whisper-large-v3-turbo-local` (whisper.cpp on this Mac; `localModel` in status says whether it is ready).
+Models: `gpt-4o-transcribe` (default), `gpt-4o-mini-transcribe`, `whisper-1` (OpenAI), and `whisper-large-v3-turbo-local` (whisper.cpp on this Mac; `localModel` in status says whether it is ready, `localModelLoaded` whether it is loaded and waiting). With the local model pick the language (`es` or `en`): detection is slower, and a fixed language translates speech in the other one.
 Everything else: `vtt help`, and `vtt help <command>` for its options.

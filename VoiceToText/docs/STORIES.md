@@ -86,6 +86,8 @@ As the user, I pick my own dictation shortcut in Settings; ⌃. stays the defaul
 Screens: settings
 Acceptance:
 - [unit] The default is ⌃.; it is saved in settings.json; a key without ⌃ or ⌥ is refused (⌘W, ⌘Q stay with apps); a bad saved one falls back to ⌃.
+- [unit] Modifiers alone (⌥⌘) need two, with ⌃ or ⌥; the tap fires on release, not when a key, click, or extra modifier came while held.
+- [self] Two modifiers pressed and let go become the shortcut; one is ignored; a key with them wins.
 - [self] Change… records the next press; ⇧ alone is refused and recording goes on; Escape cancels; Reset goes back to ⌃.; closing Settings stops recording; status shows the new one.
 - [snap] Settings shows the changed shortcut with Reset, and the recording state with a refused press.
 - [manual] The new shortcut starts and stops dictation in another app; one another app owns is refused and the old one stays.
@@ -101,3 +103,32 @@ Acceptance:
 - [snap] `menubar-<state>` shots for every state, with the dot.
 - [manual] A real click, right-click, ⌥-click and a file drag on the icon.
 Status: done
+
+### S-013 Know what's missing before dictating
+As the user, I learn at launch that the mic or Accessibility is missing, with a button to allow it, instead of finding out after I talked.
+Screens: settings, menu
+Acceptance:
+- [self] Missing access shows first in the menu with a fix, keeps a dot on the icon, and the shortcut opens Settings instead of recording; the CLI still records; all allowed, no warning.
+- [snap] Settings starts with "Needed before you dictate", one row per missing permission with its button.
+- [manual] Launch asks for the mic and opens Settings; allowing Accessibility makes ⌥⌘ work without a restart.
+Status: done
+
+### S-014 The local model answers fast
+As the user, I dictate with the local model and the text lands about half a second after I let go, however long I talked.
+Acceptance:
+- [unit] whisper-server is started once with the model and the voice detector, on 127.0.0.1:8178; one already answering there is used; each request carries the language and the text before it.
+- [unit] Pieces are cut in pauses (≥ 4 s of speech, then ≥ 0.6 s quiet), or at 25 s with no pause; silence is never sent; digital zeros and a noisy room don't hide the pauses.
+- [unit] Pieces go out in order while the person talks; a failed piece fails the stream; whole files fall back to whisper-cli when the server is down or fails.
+- [self] The local model streams; at key-up only the rest is sent; a failed piece falls back to the whole file; no stream while the server loads or with OpenAI; `vtt stop` reports `latencyMs` and `streamed`.
+- [e2e] `tools/latency.sh`: 4–9 s clips ~0.5 s through the server (1.4–1.6 s with whisper-cli and auto language); `--file-mic` a 23 s dictation with pauses 0.55 s streamed (1.76 s before), same text.
+- [manual] Dictate 20 s or more with real pauses into another app.
+Status: done
+
+### S-015 Spanish or English in one click
+As the user, I switch between Spanish and English from the menu bar; the language is fixed, so no time goes on detecting it.
+Screens: menu
+Acceptance:
+- [self] The menu lists Español and English with the current one ticked (and any other language picked in Settings); a click switches and saves it.
+- [manual] Pick English, dictate English; pick Español, dictate Spanish.
+Status: done
+

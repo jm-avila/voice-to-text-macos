@@ -46,6 +46,10 @@ enum SelfTest {
         func wait(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
         func historyFile() -> String { (try? String(contentsOf: store.historyURL, encoding: .utf8)) ?? "" }
         paster.canPaste = { true }
+        // The test copy's own grants don't matter: S-013 turns them off on purpose.
+        let permissions = services.permissions
+        permissions.accessibility = true
+        permissions.microphone = .granted
 
         // S-001 Press, talk, press: the text is pasted where the cursor is.
         recorder.startDelay = .milliseconds(300)
@@ -269,6 +273,28 @@ enum SelfTest {
               !shortcuts.isRecording && shortcuts.problem == nil && services.hotkeys.combo == optionD
                 && Store(directory: store.directory).loadSettings().shortcut == optionD)
         check("S-011 status reports the new shortcut", result(await agent("status"))?["shortcut"] as? String == "⌥⌘D")
+        func flags(_ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0, context: nil,
+                             characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: UInt16(kVK_Option))!
+        }
+        shortcuts.start()
+        _ = shortcuts.handle(flags(.option))
+        _ = shortcuts.handle(flags([]))
+        check("S-011 one modifier let go is not a shortcut yet", shortcuts.isRecording && shortcuts.problem == nil)
+        _ = shortcuts.handle(flags([.shift, .command]))
+        _ = shortcuts.handle(flags([]))
+        check("S-011 ⇧⌘ alone is refused and recording goes on", shortcuts.isRecording && shortcuts.problem != nil)
+        _ = shortcuts.handle(flags(.option))
+        _ = shortcuts.handle(flags([.option, .command]))
+        _ = shortcuts.handle(press(kVK_ANSI_D, [.option, .command], "d"))
+        check("S-011 a key with the modifiers beats modifiers alone", services.hotkeys.combo == optionD && !shortcuts.isRecording)
+        let optionCommand = Shortcut.modifiersOnly(Shortcut.option | Shortcut.command)
+        shortcuts.start()
+        for held: NSEvent.ModifierFlags in [.option, [.option, .command], .command, []] { _ = shortcuts.handle(flags(held)) }
+        check("S-011 ⌥⌘ pressed and let go becomes the shortcut, saved",
+              !shortcuts.isRecording && services.hotkeys.combo == optionCommand
+                && Store(directory: store.directory).loadSettings().shortcut == optionCommand)
+        check("S-011 status reports ⌥⌘", result(await agent("status"))?["shortcut"] as? String == "⌥⌘")
         shortcuts.reset()
         check("S-011 Reset goes back to ⌃.", services.hotkeys.combo == .standard
                 && Store(directory: store.directory).loadSettings().shortcut == .standard)
@@ -329,6 +355,90 @@ enum SelfTest {
                 && dictation.history.last?.text == "From a dropped file." && dictation.notice == .copied
                 && paster.pasteboard.string(forType: .string) == "From a dropped file.")
         await wait(1.5)
+
+        // S-013 Missing access is asked for up front and shown, never found out after talking.
+        permissions.accessibility = false
+        let menu = NSMenu()
+        icon.menuNeedsUpdate(menu)
+        let fixItem = menu.items.first { $0.title == Permissions.Need.accessibility.menuTitle }
+        check("S-013 the menu offers to allow Accessibility, first", fixItem != nil && menu.items.firstIndex { $0 === fixItem } ?? 99 < 3)
+        icon.refresh()
+        check("S-013 the icon keeps a dot and says what is missing", icon.needsAccess && icon.isShown)
+        services.settingsWindow.close()
+        let blockedFrom = transcriber.calls.count
+        await dictation.toggle()
+        check("S-013 the shortcut opens Settings instead of recording", dictation.state == .idle
+                && services.settingsWindow.isVisible && transcriber.calls.count == blockedFrom)
+        try? await dictation.start()
+        check("S-013 the CLI still records (it pastes nothing)", dictation.state.name == "recording")
+        await dictation.cancel()
+        permissions.accessibility = true
+        permissions.microphone = .denied
+        check("S-013 a denied mic opens System Settings", permissions.missing == [.microphone] && permissions.fixTitle(.microphone) == "Open Settings")
+        permissions.microphone = .granted
+        icon.menuNeedsUpdate(menu)
+        check("S-013 all allowed: no warning, and the shortcut records", !icon.needsAccess
+                && !menu.items.contains { $0.title == Permissions.Need.accessibility.menuTitle })
+        await dictation.toggle()
+        check("S-013 with everything allowed the shortcut records", dictation.state.name == "recording")
+        await dictation.cancel()
+        services.settingsWindow.close()
+
+        // S-014 The local model: pieces are transcribed while you talk; key-up only sends the rest.
+        func tone(_ seconds: Double, _ amplitude: Float) -> [Float] {
+            (0..<Int(seconds * Double(WAV.rate))).map { amplitude * sin(Float($0) * 2 * .pi * 220 / Float(WAV.rate)) }
+        }
+        dictation.settings.model = LocalWhisper.model
+        dictation.settings.language = "es"
+        transcriber.resetPieces()
+        transcriber.pieceReply = .success("Una pieza.")
+        let filesBefore = transcriber.calls.count
+        try? await dictation.start()
+        check("S-014 the local model asks the mic for its audio as it arrives", recorder.streamed)
+        recorder.speak(tone(5, 0.3) + tone(1, 0.0005))
+        await wait(0.3)
+        check("S-014 a piece is transcribed during the dictation, in the chosen language",
+              transcriber.pieces.count == 1 && transcriber.pieces.first?.language == "es")
+        recorder.speak(tone(1, 0.3))
+        let streamed = result(await agent("stop"))
+        check("S-014 at key-up only the rest is sent, with the text before it as prompt, and no whole file",
+              transcriber.pieces.count == 2 && transcriber.pieces.last?.prompt == "Una pieza." && transcriber.calls.count == filesBefore
+                && streamed?["text"] as? String == "Una pieza. Una pieza." && streamed?["streamed"] as? Bool == true)
+        check("S-014 stop reports key-up to text in ms", (streamed?["latencyMs"] as? Int).map { $0 >= 0 && $0 < 1000 } == true)
+
+        transcriber.pieceReply = .failure(TranscriptionError.local("whisper-server: gone"))
+        transcriber.reply = .success("The whole file.")
+        try? await dictation.start()
+        recorder.speak(tone(5, 0.3) + tone(1, 0.0005))
+        await wait(0.3)
+        check("S-014 a failed piece falls back to the whole file", (try? await dictation.stop(paste: false)) == "The whole file."
+                && transcriber.calls.count == filesBefore + 1)
+
+        transcriber.isReady = false
+        try? await dictation.start()
+        check("S-014 with the server not loaded yet, nothing streams", !recorder.streamed)
+        _ = try? await dictation.stop(paste: false)
+        transcriber.isReady = true
+        dictation.settings.model = "gpt-4o-transcribe"
+        try? await dictation.start()
+        check("S-014 OpenAI models never stream", !recorder.streamed)
+        await dictation.cancel()
+        transcriber.pieceReply = .success("Piece.")
+
+        // S-015 One click between Spanish and English in the menu.
+        let languages = NSMenu()
+        icon.menuNeedsUpdate(languages)
+        func languageItem(_ title: String) -> NSMenuItem? { languages.items.first { $0.title == title } }
+        let english = languageItem(SettingsView.languageName("en"))
+        check("S-015 the menu lists Español and English, the current one ticked",
+              languageItem(SettingsView.languageName("es"))?.state == .on && english?.state == .off)
+        english.map { _ = ($0.target as? NSObject)?.perform($0.action) }
+        check("S-015 a click switches the language and saves it",
+              dictation.settings.language == "en" && Store(directory: store.directory).loadSettings().language == "en")
+        dictation.settings.language = "fr"
+        icon.menuNeedsUpdate(languages)
+        check("S-015 another language from Settings shows too, ticked", languageItem(SettingsView.languageName("fr"))?.state == .on)
+        dictation.settings = DictationSettings()
 
         // Every SF Symbol the app uses exists.
         let symbols = ["waveform", "mic", "mic.fill", "checkmark", "xmark", "checkmark.circle.fill", "doc.on.clipboard", "ear",

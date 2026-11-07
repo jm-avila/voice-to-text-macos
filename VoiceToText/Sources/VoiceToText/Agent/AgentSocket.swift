@@ -136,7 +136,7 @@ nonisolated enum AgentSocket {
         if bundle.pathExtension == "app" {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             var arguments = ["-g", "-n", bundle.path]
-            for key in ["APP_STORE", "APP_AGENT_SOCKET"] {
+            for key in ["APP_STORE", "APP_AGENT_SOCKET", "APP_FAKE_MIC"] {
                 if let value = ProcessInfo.processInfo.environment[key] { arguments += ["--env", "\(key)=\(value)"] }
             }
             // Only a test run (APP_STORE set) may open a second copy.

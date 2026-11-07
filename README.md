@@ -112,7 +112,10 @@ It is a plain Swift package (`Package.swift`) with no Xcode project and no third
 | OpenAI gpt-4o-transcribe | `gpt-4o-transcribe` | OpenAI | Per minute of audio | Default. Most accurate. |
 | OpenAI gpt-4o-mini-transcribe | `gpt-4o-mini-transcribe` | OpenAI | Cheaper | Slightly less accurate |
 | OpenAI whisper-1 | `whisper-1` | OpenAI | Per minute | The original hosted Whisper |
-| Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. About 1.5 s for a 4 s clip on an M4 Pro, model load included. |
+| Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. The model stays loaded and long dictations are transcribed while you talk: about 0.5 s after you let go on an M4 Pro, for 4 s or 23 s. |
+
+The menu bar menu switches the language between Español and English in one click. A fixed language is faster than
+detecting it, but speech in the other language comes back translated, so switch before you dictate.
 
 The local model uses the Silero voice detector. Without it, Whisper "hears" "Thank you." in silence; with it, silence
 comes back as nothing heard. OpenAI uploads are limited to 25 MB, about 70 minutes.
@@ -176,9 +179,10 @@ your Mac.
 
 ```sh
 cd VoiceToText
-tools/test.sh .        # 24 unit tests
-tools/selftest.sh      # 51 in-app checks with a fake mic and transcriber
-tools/e2e.sh           # 20 checks against the real API and the local model (`say` clips, silence, CLI, MCP, restart)
+tools/test.sh .        # 53 unit tests
+tools/selftest.sh      # 101 in-app checks with a fake mic and transcriber
+tools/e2e.sh           # 21 checks against the real API and the local model (`say` clips, silence, CLI, MCP, restart)
+tools/latency.sh --file-mic   # key-up to text with the local model: whisper-cli vs the loaded model vs streaming
 tools/snap.sh          # screenshots of every pill state and Settings, light and dark
 ```
 

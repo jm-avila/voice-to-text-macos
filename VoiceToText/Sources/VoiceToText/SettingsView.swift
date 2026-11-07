@@ -83,6 +83,22 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            if !permissions.missing.isEmpty {
+                Section {
+                    ForEach(permissions.missing) { need in
+                        LabeledContent {
+                            Button(permissions.fixTitle(need)) { permissions.fix(need) }
+                                .buttonStyle(.borderedProminent)
+                        } label: {
+                            Label(need.title, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.primary, .orange)
+                            Text(need.why)
+                        }
+                    }
+                } header: {
+                    Text("Needed before you dictate")
+                }
+            }
             Section("Dictation") {
                 LabeledContent("Shortcut") {
                     HStack(spacing: Space.sm) {
@@ -156,19 +172,12 @@ struct SettingsView: View {
                     case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
                     }
                 }
-                LabeledContent("Microphone") {
-                    switch permissions.microphone {
-                    case .granted: Status(ok: true, text: "Allowed")
-                    case .notAsked: Button("Allow") { Task { _ = await permissions.requestMicrophone() } }
-                    case .denied: Button("Open Settings") { permissions.openPane("Privacy_Microphone") }
-                    }
+                // Missing ones are at the top, with their button.
+                if permissions.microphone == .granted {
+                    LabeledContent("Microphone") { Status(ok: true, text: "Allowed") }
                 }
-                LabeledContent("Accessibility") {
-                    if permissions.accessibility {
-                        Status(ok: true, text: "Allowed")
-                    } else {
-                        Button("Allow") { permissions.requestAccessibility() }
-                    }
+                if permissions.accessibility {
+                    LabeledContent("Accessibility") { Status(ok: true, text: "Allowed") }
                 }
             } header: {
                 Text("Access")

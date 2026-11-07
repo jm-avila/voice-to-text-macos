@@ -35,6 +35,15 @@ public enum LocalWhisper {
             .filter { $0.wholeMatch(of: /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/) == nil }
             .joined(separator: "\n"))
     }
+
+    /// A 16 kHz mono WAV copy of any audio file, made by afconvert (part of
+    /// macOS), in the temporary folder. The caller deletes it.
+    public static func wav(from file: URL) async throws -> URL {
+        let wav = FileManager.default.temporaryDirectory.appending(path: "vtt-\(UUID().uuidString).wav")
+        _ = try await LocalWhisperTranscriber.run(URL(fileURLWithPath: "/usr/bin/afconvert"),
+                                                  ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", file.path, wav.path])
+        return wav
+    }
 }
 
 /// Runs whisper-cli on a 16 kHz mono WAV that afconvert (part of macOS)
@@ -59,10 +68,8 @@ public struct LocalWhisperTranscriber: Transcribing {
         let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0
         guard size > 0 else { throw TranscriptionError.emptyRecording }
 
-        let wav = FileManager.default.temporaryDirectory.appending(path: "vtt-\(UUID().uuidString).wav")
+        let wav = try await LocalWhisper.wav(from: file)
         defer { try? FileManager.default.removeItem(at: wav) }
-        _ = try await Self.run(URL(fileURLWithPath: "/usr/bin/afconvert"),
-                               ["-f", "WAVE", "-d", "LEI16@16000", "-c", "1", file.path, wav.path])
         let output = try await Self.run(cli, LocalWhisper.arguments(model: modelURL, vad: vadURL, wav: wav, language: language))
         return LocalWhisper.clean(output)
     }

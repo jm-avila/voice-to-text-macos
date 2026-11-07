@@ -30,8 +30,41 @@ final class Permissions {
         case granted, notAsked, denied
     }
 
-    private(set) var accessibility = AXIsProcessTrusted()
-    private(set) var microphone = Permissions.readMicrophone()
+    /// What dictating needs and doesn't have yet. Asked for at launch, shown
+    /// at the top of Settings and the menu, each with a button that fixes it.
+    enum Need: String, CaseIterable, Identifiable {
+        case microphone, accessibility
+        var id: String { rawValue }
+        var title: String { self == .microphone ? "Microphone" : "Accessibility" }
+        var why: String {
+            self == .microphone ? "To hear you. Without it nothing is recorded."
+                                : "To paste where you type, and for a shortcut of modifiers alone."
+        }
+        var menuTitle: String { self == .microphone ? "Allow the Microphone…" : "Allow Accessibility to Paste…" }
+    }
+
+    // Set only by polling, and by the self-test (which never polls).
+    var accessibility = AXIsProcessTrusted()
+    var microphone = Permissions.readMicrophone()
+    /// After accessibility or the microphone changes.
+    @ObservationIgnored var onChange: () -> Void = {}
+
+    var missing: [Need] {
+        Need.allCases.filter { $0 == .microphone ? microphone != .granted : !accessibility }
+    }
+
+    /// The button's title for a need: macOS asks once, then only System Settings can change it.
+    func fixTitle(_ need: Need) -> String {
+        need == .microphone && microphone == .denied ? "Open Settings" : "Allow"
+    }
+
+    func fix(_ need: Need) {
+        switch need {
+        case .microphone where microphone == .notAsked: Task { _ = await requestMicrophone() }
+        case .microphone: openPane("Privacy_Microphone")
+        case .accessibility: requestAccessibility()
+        }
+    }
     /// Polled too, so Settings shows "Downloaded" once tools/get-model.sh finishes.
     private(set) var localModel = LocalWhisper.status
     @ObservationIgnored private var timer: Timer?
@@ -47,9 +80,11 @@ final class Permissions {
 
     func refresh() {
         let trusted = AXIsProcessTrusted()
-        if trusted != accessibility { accessibility = trusted }
         let mic = Self.readMicrophone()
+        let changed = trusted != accessibility || mic != microphone
+        if trusted != accessibility { accessibility = trusted }
         if mic != microphone { microphone = mic }
+        if changed { onChange() }
         let local = LocalWhisper.status
         if local != localModel { localModel = local }
     }
@@ -63,8 +98,17 @@ final class Permissions {
         return microphone == .granted
     }
 
-    /// Shows the system prompt and opens the Accessibility pane.
+    /// Shows the system prompt and opens the Accessibility pane. Clears this
+    /// app's entry first: an ad hoc build's grant names its code hash, so after a
+    /// rebuild the old switch shows on and does nothing, and can't be turned on.
     func requestAccessibility() {
+        if let id = Bundle.main.bundleIdentifier {
+            let reset = Process()
+            reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            reset.arguments = ["reset", "Accessibility", id]
+            try? reset.run()
+            reset.waitUntilExit()
+        }
         // The key's value, kAXTrustedCheckOptionPrompt, as a literal: the C global is not concurrency-safe.
         _ = AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": true] as CFDictionary)
         openPane("Privacy_Accessibility")
@@ -97,15 +141,19 @@ extension Shortcut {
     ]
 
     init(event: NSEvent) {
-        let flags = event.modifierFlags
+        // The key's own character, as printed on it (⌥D gives "D", not "∂").
+        let key = Self.name(keyCode: Int(event.keyCode), plain: event.characters(byApplyingModifiers: []) ?? "")
+        self.init(keyCode: UInt32(event.keyCode), modifiers: Self.modifiers(event.modifierFlags), key: key)
+    }
+
+    /// AppKit's flags in Carbon bits.
+    static func modifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
         var modifiers: UInt32 = 0
         if flags.contains(.control) { modifiers |= Shortcut.control }
         if flags.contains(.option) { modifiers |= Shortcut.option }
         if flags.contains(.shift) { modifiers |= Shortcut.shift }
         if flags.contains(.command) { modifiers |= Shortcut.command }
-        // The key's own character, as printed on it (⌥D gives "D", not "∂").
-        let key = Self.name(keyCode: Int(event.keyCode), plain: event.characters(byApplyingModifiers: []) ?? "")
-        self.init(keyCode: UInt32(event.keyCode), modifiers: modifiers, key: key)
+        return modifiers
     }
 
     /// The key as printed on it, from its character with no modifiers. "" when it has no name.
@@ -136,7 +184,9 @@ extension Shortcut {
 /// and the key never reaches the front app. Registered exclusively, so it
 /// fails (and Settings says so) while another app, like the Hammerspoon
 /// version of this tool, owns ⌃. — both would record at once otherwise.
-/// The combo comes from settings.json; Settings changes it.
+/// The combo comes from settings.json; Settings changes it. Modifiers alone
+/// (⌥⌘) have no Carbon hotkey: event monitors watch for the tap instead.
+/// Those see other apps' events only with Accessibility, which paste needs too.
 @Observable
 final class HotkeyCenter {
     static let shared = HotkeyCenter()
@@ -145,10 +195,13 @@ final class HotkeyCenter {
     /// noErr when registered. Anything else: another app owns the combo.
     private(set) var status: OSStatus = noErr
     @ObservationIgnored private var ref: EventHotKeyRef?
+    @ObservationIgnored private var monitors: [Any] = []
+    @ObservationIgnored private var tap = ModifierTap(0)
     @ObservationIgnored private var action: (() -> Void)?
     @ObservationIgnored private var handlerInstalled = false
 
-    var isRegistered: Bool { ref != nil && status == noErr }
+    /// A modifiers-only tap also needs Accessibility: without it the monitors see nothing.
+    var isRegistered: Bool { status == noErr && (ref != nil || (!monitors.isEmpty && AXIsProcessTrusted())) }
     /// Registering failed: another app owns the combo. False before the first
     /// try, so a test copy (which never registers) shows no warning.
     var isTaken: Bool { status != noErr }
@@ -157,6 +210,11 @@ final class HotkeyCenter {
         unregister()
         self.combo = combo
         self.action = action
+        if combo.isModifiersOnly {
+            watchTap(combo.modifiers)
+            status = noErr
+            return
+        }
         installHandler()
         let id = EventHotKeyID(signature: OSType(0x5654_5458), id: 1)   // 'VTTX', 1
         status = RegisterEventHotKey(combo.keyCode, combo.modifiers, id, GetApplicationEventTarget(),
@@ -189,9 +247,35 @@ final class HotkeyCenter {
     func unregister() {
         if let ref { UnregisterEventHotKey(ref) }
         ref = nil
+        monitors.forEach(NSEvent.removeMonitor)
+        monitors = []
     }
 
     func fire() { action?() }
+
+    /// Global monitors see other apps' events, the local one this app's (Settings).
+    private func watchTap(_ modifiers: UInt32) {
+        tap = ModifierTap(modifiers)
+        let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+        monitors = [
+            NSEvent.addGlobalMonitorForEvents(matching: events) { event in
+                MainActor.assumeIsolated { HotkeyCenter.shared.handleTap(event) }
+            },
+            NSEvent.addLocalMonitorForEvents(matching: events) { event in
+                HotkeyCenter.shared.handleTap(event)
+                return event
+            },
+        ].compactMap { $0 }
+    }
+
+    func handleTap(_ event: NSEvent) {
+        guard !monitors.isEmpty else { return }
+        if event.type == .flagsChanged {
+            if tap.changed(to: Shortcut.modifiers(event.modifierFlags)) { fire() }
+        } else {
+            tap.otherInput()
+        }
+    }
 
     private func installHandler() {
         guard !handlerInstalled else { return }
@@ -205,7 +289,8 @@ final class HotkeyCenter {
 }
 
 /// Settings' "Change…": the next key press with ⌃ or ⌥ becomes the
-/// shortcut, saved to settings.json. Escape cancels.
+/// shortcut, saved to settings.json. Two or more modifiers pressed and let
+/// go with no key become a modifiers-only one. Escape cancels.
 @Observable
 final class ShortcutRecorder {
     private(set) var isRecording = false
@@ -214,6 +299,8 @@ final class ShortcutRecorder {
     @ObservationIgnored private let hotkeys: HotkeyCenter
     @ObservationIgnored private let dictation: Dictation
     @ObservationIgnored private var monitor: Any?
+    /// Every modifier held since the last time none were.
+    @ObservationIgnored private var peak: UInt32 = 0
 
     init(hotkeys: HotkeyCenter, dictation: Dictation) {
         self.hotkeys = hotkeys
@@ -223,11 +310,12 @@ final class ShortcutRecorder {
     func start() {
         guard !isRecording else { return }
         problem = nil
+        peak = 0
         isRecording = true
         hotkeys.pause()
         // Settings is the key window while recording, so a local monitor sees the press
         // before any menu shortcut does. Returning nil swallows it.
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             self?.handle(event) == true ? nil : event
         }
     }
@@ -237,6 +325,8 @@ final class ShortcutRecorder {
     /// Uses a key press. True when it was meant for the recorder.
     func handle(_ event: NSEvent) -> Bool {
         guard isRecording else { return false }
+        if event.type == .flagsChanged { return modifiersChanged(Shortcut.modifiers(event.modifierFlags)) }
+        peak = 0   // a key came: the modifiers go with it
         let shortcut = Shortcut(event: event)
         if shortcut.modifiers == 0, Int(event.keyCode) == kVK_Escape {
             finish()
@@ -246,6 +336,18 @@ final class ShortcutRecorder {
             use(shortcut)
         }
         return true
+    }
+
+    /// Modifiers alone: used when let go, if two or more were held. Passed on
+    /// (false) so the window still sees them.
+    private func modifiersChanged(_ held: UInt32) -> Bool {
+        if held != 0 { peak |= held; return false }
+        let shortcut = Shortcut.modifiersOnly(peak)
+        let count = peak.nonzeroBitCount
+        peak = 0
+        guard count >= 2 else { return false }   // one modifier: still choosing
+        if let problem = shortcut.problem { self.problem = problem } else { use(shortcut) }
+        return false
     }
 
     func reset() { use(.standard) }
