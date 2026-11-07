@@ -122,6 +122,22 @@ without its optional parts (speech synthesis, diarization). The first build fetc
 | Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. The model stays loaded and long dictations are transcribed while you talk: about 0.5 s after you let go on an M4 Pro, for 4 s or 23 s. |
 | Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | **Default.** Offline after a 610 MB download the first time it is used. 0.08 s after you let go for a short dictation, 0.25 s for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
 
+### Speed by model
+
+M4 Pro, Spanish, Español chosen, 2026-11-07. Median of 3 (files) or 5 (dictations).
+
+| Model | Dictation, key-up to text: short | Dictation: 23 s | File (`vtt transcribe`): 2 s | File: 23 s |
+|---|---|---|---|---|
+| Parakeet Ultra (default) | **0.08 s** | **0.25 s** | **0.07 s** | **0.21 s** |
+| Whisper large-v3-turbo (local) | 0.53 s | 0.55 s (streamed while you talk) | 0.51 s | 0.80 s |
+| OpenAI gpt-4o-transcribe | ≈ file time | ≈ file time | 0.64 s | 1.58 s |
+| OpenAI gpt-4o-mini-transcribe | ≈ file time | ≈ file time | 0.67 s | 1.10 s |
+| OpenAI whisper-1 | ≈ file time | ≈ file time | 0.78 s | 2.06 s |
+
+The OpenAI times depend on the network and on OpenAI's load: they upload the whole recording at key-up, so a dictation
+takes about what its file does. Re-run with `tools/latency.sh --file-mic` (local models) or
+`vtt transcribe <file> --json` after `vtt settings update --model <id>`.
+
 The menu bar menu switches the language between Español and English in one click. With Whisper a fixed language is
 faster than detecting it, but speech in the other language comes back translated, so switch before you dictate. Parakeet
 only uses it as a hint for the alphabet, and never translates.
