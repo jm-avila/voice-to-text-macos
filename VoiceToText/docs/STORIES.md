@@ -143,3 +143,11 @@ Acceptance:
 - [manual] Pick Parakeet (the first time it downloads 610 MB), dictate 20 s in Spanish, then a sentence in English without switching.
 Status: done
 
+### S-017 Parakeet from memory
+As the user, my long dictations are text in under 0.2 s too: Parakeet takes the samples the recorder already has instead of waiting for the file.
+Screens: none
+Acceptance:
+- [unit] The sample buffer keeps order across threads; under 0.25 s is nothing heard without loading the model; the real model gives the same text from memory as from the file.
+- [self] With Parakeet the recorder's samples are kept, all of them go at key-up in the chosen language, and the file is not read; with samples missing, or a failure, the whole file goes instead.
+- [manual] `vtt stop --json` shows `"inMemory": true` and a lower `latencyMs` for a 20 s dictation.
+Status: done
