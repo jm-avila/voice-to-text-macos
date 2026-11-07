@@ -112,3 +112,23 @@ Acceptance:
 - [snap] Settings starts with "Needed before you dictate", one row per missing permission with its button.
 - [manual] Launch asks for the mic and opens Settings; allowing Accessibility makes ⌥⌘ work without a restart.
 Status: done
+
+### S-014 The local model answers fast
+As the user, I dictate with the local model and the text lands about half a second after I let go, however long I talked.
+Acceptance:
+- [unit] whisper-server is started once with the model and the voice detector, on 127.0.0.1:8178; one already answering there is used; each request carries the language and the text before it.
+- [unit] Pieces are cut in pauses (≥ 4 s of speech, then ≥ 0.6 s quiet), or at 25 s with no pause; silence is never sent; digital zeros and a noisy room don't hide the pauses.
+- [unit] Pieces go out in order while the person talks; a failed piece fails the stream; whole files fall back to whisper-cli when the server is down or fails.
+- [self] The local model streams; at key-up only the rest is sent; a failed piece falls back to the whole file; no stream while the server loads or with OpenAI; `vtt stop` reports `latencyMs` and `streamed`.
+- [e2e] `tools/latency.sh`: 4–9 s clips ~0.5 s through the server (1.4–1.6 s with whisper-cli and auto language); `--file-mic` a 23 s dictation with pauses 0.55 s streamed (1.76 s before), same text.
+- [manual] Dictate 20 s or more with real pauses into another app.
+Status: done
+
+### S-015 Spanish or English in one click
+As the user, I switch between Spanish and English from the menu bar; the language is fixed, so no time goes on detecting it.
+Screens: menu
+Acceptance:
+- [self] The menu lists Español and English with the current one ticked (and any other language picked in Settings); a click switches and saves it.
+- [manual] Pick English, dictate English; pick Español, dictate Spanish.
+Status: done
+
