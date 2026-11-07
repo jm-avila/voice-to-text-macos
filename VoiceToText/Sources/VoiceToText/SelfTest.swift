@@ -403,7 +403,7 @@ enum SelfTest {
         let streamed = result(await agent("stop"))
         check("S-014 at key-up only the rest is sent, with the text before it as prompt, and no whole file",
               transcriber.pieces.count == 2 && transcriber.pieces.last?.prompt == "Una pieza." && transcriber.calls.count == filesBefore
-                && streamed?["text"] as? String == "Una pieza. Una pieza.")
+                && streamed?["text"] as? String == "Una pieza. Una pieza." && streamed?["streamed"] as? Bool == true)
         check("S-014 stop reports key-up to text in ms", (streamed?["latencyMs"] as? Int).map { $0 >= 0 && $0 < 1000 } == true)
 
         transcriber.pieceReply = .failure(TranscriptionError.local("whisper-server: gone"))

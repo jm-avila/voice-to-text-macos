@@ -35,6 +35,20 @@ struct Chunking {
         #expect(first.count + tail.count == audio.count)
     }
 
+    @Test("Digital zeros while the mic opens do not hide the pauses")
+    func zerosFirst() {
+        var chunker = SpeechChunker()
+        let audio = [Float](repeating: 0, count: WAV.rate / 3) + Audio.speech(5) + Audio.pause(1) + Audio.speech(1)
+        #expect(Audio.feed(audio, into: &chunker).count == 1)
+    }
+
+    @Test("A noisy room: pauses 15 dB under the voice are found")
+    func noisyRoom() {
+        var chunker = SpeechChunker()
+        let audio = Audio.tone(5, amplitude: 0.05) + Audio.tone(1, amplitude: 0.009) + Audio.tone(1, amplitude: 0.05)
+        #expect(Audio.feed(audio, into: &chunker).count == 1)
+    }
+
     @Test("Less than 4 s of speech before a pause is not cut")
     func shortSpeechWaits() {
         var chunker = SpeechChunker()

@@ -22,7 +22,7 @@ enum AgentCommands {
                      params: [.init(name: "paste", kind: .boolean, help: "also paste the text into the app in front")],
                      example: "vtt stop --json") { args, services in
             let text = try await services.dictation.stop(paste: try args.bool("paste") ?? false)
-            var reply: JSONObject = ["text": text, "saved": !text.isEmpty]
+            var reply: JSONObject = ["text": text, "saved": !text.isEmpty, "streamed": services.dictation.lastStreamed]
             // Key-up to text, in milliseconds: how fast it felt.
             if !text.isEmpty, let latency = services.dictation.lastLatency {
                 reply["latencyMs"] = Int((Double(latency.components.attoseconds) / 1e15 + Double(latency.components.seconds) * 1000).rounded())

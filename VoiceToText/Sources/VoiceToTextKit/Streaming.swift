@@ -39,8 +39,10 @@ public struct SpeechChunker: Sendable {
     /// Audio not sent yet, and the level of each of its 20 ms frames.
     private var pending: [Float] = []
     private var levels: [Float] = []
-    /// The quietest frame heard so far: the room's noise. Speech is well above it.
-    private var noise: Float?
+    /// The last 10 s of frame levels, across pieces, for telling speech from pause.
+    private var recent: [Float] = []
+    /// Halfway between the quiet and the loud frames of `recent`: below it is a pause.
+    private var threshold = SpeechChunker.silenceFloor
 
     public init(minSpeech: Double = 4, minPause: Double = 0.6, maxPiece: Double = 25) {
         self.minSpeech = minSpeech
@@ -57,8 +59,12 @@ public struct SpeechChunker: Sendable {
             let frame = pending[levels.count * Self.frame ..< (levels.count + 1) * Self.frame]
             let level = Self.decibels(frame)
             levels.append(level)
-            // The floor follows the quietest frames, and rises 1 dB a second if the room gets louder.
-            noise = min(level, noise.map { $0 + 0.02 } ?? level)
+            // Digital zeros (the first frames from a mic, a muted one) say nothing about the room.
+            if level > -100 {
+                recent.append(level)
+                if recent.count > 500 { recent.removeFirst(recent.count - 500) }
+                threshold = Self.threshold(recent)
+            }
             if let cut = cutPoint() {
                 // A piece of silence (a long pause before speaking) is not sent.
                 if levels[..<cut].contains(where: { $0 > Self.silenceFloor }) {
@@ -96,9 +102,20 @@ public struct SpeechChunker: Sendable {
         return nil
     }
 
-    /// Speech is at least 15 dB over the room's noise, and above the silence floor.
     private func isSpeech(_ level: Float) -> Bool {
-        level > max((noise ?? level) + 15, Self.silenceFloor)
+        level > threshold
+    }
+
+    /// The level between pause and speech: the midpoint of the quietest and the
+    /// loudest tenth of the frames, so it follows the room and the voice. Under
+    /// 10 dB apart there is no telling them apart: no pause is found, and the
+    /// piece is cut at `maxPiece`.
+    static func threshold(_ levels: [Float]) -> Float {
+        guard levels.count >= 25 else { return 0 }
+        let sorted = levels.sorted()
+        let quiet = sorted[sorted.count / 10], loud = sorted[sorted.count * 9 / 10]
+        guard loud - quiet >= 10 else { return loud < silenceFloor ? silenceFloor : -.infinity }
+        return max(silenceFloor, (quiet + loud) / 2)
     }
 
     /// The level of some samples in dBFS: 0 is full scale, -160 is silence.

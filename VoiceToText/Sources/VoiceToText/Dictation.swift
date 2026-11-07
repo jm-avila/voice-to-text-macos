@@ -118,6 +118,8 @@ final class Dictation {
     private(set) var failures = 0
     /// Key-up to text of the last dictation: how fast it felt.
     private(set) var lastLatency: Duration?
+    /// The last dictation was transcribed while it was spoken (no whole file at key-up).
+    private(set) var lastStreamed = false
     var settings: DictationSettings {
         didSet {
             guard settings != oldValue else { return }
@@ -304,8 +306,10 @@ final class Dictation {
     private func transcribeRecording(paste: Bool, stream: StreamingTranscription? = nil, since start: ContinuousClock.Instant) async throws -> String {
         let text: String
         do {
+            lastStreamed = false
             if let stream, let streamed = try? await stream.finish() {
                 text = streamed
+                lastStreamed = true
             } else {
                 text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
             }

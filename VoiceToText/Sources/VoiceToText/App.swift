@@ -5,6 +5,7 @@ import VoiceToTextKit
 //   VoiceToText                       the app (menu bar only, no Dock icon)
 //   APP_STORE=<folder> VoiceToText    use another folder for history and settings (tests, experiments)
 //   APP_SNAPSHOT=<dir> VoiceToText    save PNGs of the HUD states and Settings in light and dark, then quit
+//   APP_FAKE_MIC=<file> (with APP_STORE)  the "microphone" plays that audio file (tools/latency.sh)
 //   APP_SEED=1 VoiceToText            fill an empty /tmp store with sample history (tools/snap.sh)
 //   VoiceToText --selftest            run the self-test on a /tmp store and quit with 0 or 1 (tools/selftest.sh)
 //   vtt help                          the agent CLI (Agent/, linked to ~/.local/bin/vtt by build.sh)
@@ -51,7 +52,10 @@ final class Services {
         let openAI = OpenAITranscriber(baseURL: base ?? URL(string: "https://api.openai.com/v1")!) { APIKey.read() }
         let server = WhisperServer()
         let transcriber = RoutingTranscriber(openAI: openAI, local: LocalTranscriber(server: server))
-        return Services(recorder: MicRecorder(), transcriber: transcriber, streamer: server, server: server, pasteboard: .general)
+        // A test copy can take its "microphone" from a file (tools/latency.sh).
+        let fakeMic = Store.isOverridden ? ProcessInfo.processInfo.environment["APP_FAKE_MIC"].map(URL.init(fileURLWithPath:)) : nil
+        let recorder: AudioRecording = fakeMic.map(FileRecorder.init(source:)) ?? MicRecorder()
+        return Services(recorder: recorder, transcriber: transcriber, streamer: server, server: server, pasteboard: .general)
     }
 
     /// Fakes for the self-test and snapshots: no microphone, no network, a private pasteboard, silent.
