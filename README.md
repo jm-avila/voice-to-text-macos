@@ -120,6 +120,34 @@ detecting it, but speech in the other language comes back translated, so switch 
 The local model uses the Silero voice detector. Without it, Whisper "hears" "Thank you." in silence; with it, silence
 comes back as nothing heard. OpenAI uploads are limited to 25 MB, about 70 minutes.
 
+### Local model speed
+
+From letting go of the shortcut to the text, on an M4 Pro (`say` clips, median of 3 runs, `tools/latency.sh`):
+
+| Dictation | Before (whisper-cli per dictation) | Now | Faster |
+|---|---|---|---|
+| Spanish, 4 s | 1.41 s | 0.53 s | 2.7× |
+| English, 3 s | 1.45 s | 0.50 s | 2.9× |
+| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | 3.2× |
+
+Where the time went, and what changed:
+
+| Cost before | Time | Now |
+|---|---|---|
+| Loading the 1.6 GB model on every dictation | ~370 ms | `whisper-server` keeps it loaded while the local model is selected, on `127.0.0.1:8178`. It stops when you pick another model or quit the app, and a watchdog stops it if the app crashes. |
+| Detecting the language (one extra encoder pass) | ~430 ms | The language is fixed (Español or English in the menu). |
+| Transcribing a long dictation only after you let go | ~430 ms per 30 s window | The audio is cut at your pauses (≥ 4 s of speech, then ≥ 0.6 s of quiet; at most 25 s a piece) and each piece is transcribed while you keep talking. At the end only the last piece is left. |
+
+If the server is not ready or a piece fails, the whole recording goes through the server or `whisper-cli` instead, so
+nothing is lost; it is only slower. A dictation with no long enough pause goes in one piece when you let go.
+
+Measure your own dictations:
+
+```sh
+vtt start --json; sleep 5; vtt stop --json   # latencyMs: key-up to text; streamed: whether it was cut while you talked
+tools/latency.sh --file-mic                  # whisper-cli vs the loaded model vs streaming, in a test copy
+```
+
 ## Use
 
 | Action | How |
