@@ -6,7 +6,7 @@ public struct DictationSettings: Codable, Equatable, Sendable {
     /// ISO 639-1 codes offered in Settings. "" lets the model detect the language.
     public static let languages = ["", "en", "es", "ca", "fr", "de", "it", "pt"]
 
-    public var model = "gpt-4o-transcribe"
+    public var model = Parakeet.model
     public var language = ""
     /// Tink when the mic is live, Pop when recording stops.
     public var sounds = true
@@ -17,7 +17,7 @@ public struct DictationSettings: Codable, Equatable, Sendable {
     /// The menu bar icon shows only while dictating (or after a failure).
     public var hideWhenIdle = false
 
-    public init(model: String = "gpt-4o-transcribe", language: String = "", sounds: Bool = true,
+    public init(model: String = Parakeet.model, language: String = "", sounds: Bool = true,
                 shortcut: Shortcut = .standard, clickToDictate: Bool = false, hideWhenIdle: Bool = false) {
         self.model = model
         self.language = language

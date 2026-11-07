@@ -230,6 +230,9 @@ struct Settings {
         #expect(DictationSettings.decode(try settings.encoded()) == settings)
         #expect(settings.languageCode == "es")
         #expect(DictationSettings().languageCode == nil)
+        // The fastest model, free and offline, unless the person picked another one.
+        #expect(DictationSettings().model == Parakeet.model)
+        #expect(DictationSettings.decode(Data(#"{"sounds":false}"#.utf8)).model == Parakeet.model)
     }
 
     @Test("Missing keys keep their defaults, and a broken file gives the defaults")

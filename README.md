@@ -26,7 +26,8 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 - **Two kinds of model:**
   - OpenAI: `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`.
   - Local, no key, no network, no cost:
-    - **Parakeet Ultra** through FluidAudio, on the Neural Engine. The fastest: text about 0.25 s after you let go.
+    - **Parakeet Ultra** through FluidAudio, on the Neural Engine. The default and the fastest: text 0.08 s after you
+      let go of a short dictation, 0.25 s after 23 s.
     - **Whisper large-v3-turbo** through whisper.cpp.
 - **Any language** the model supports. Detects the language by default, or set one (English, Spanish, Catalan, French, German, Italian, Portuguese).
 - **A small pill at the bottom of the screen** while dictating, with a level meter and a timer, then "Pasted", "Copied" or the error. It never takes focus, so the text lands in the app you were typing in.
@@ -97,13 +98,14 @@ without its optional parts (speech synthesis, diarization). The first build fetc
 ## Set up
 
 1. **Open the app.** A waveform icon appears in the menu bar. Opening the app again shows Settings.
-2. **Pick a model** in Settings › Model.
+2. **The model.** Parakeet Ultra is the default: it downloads once (610 MB) the first time the app opens, and needs
+   nothing else. To use another one, pick it in Settings › Model.
    - **OpenAI:** store your key in the Keychain:
      ```sh
      security add-generic-password -U -a agent-secrets -s OPENAI_API_KEY -w 'sk-...'
      ```
      `OPENAI_API_KEY` in the environment also works.
-   - **Local:** download the model once, then pick "Whisper large-v3-turbo (on this Mac)":
+   - **Local Whisper:** download the model once, then pick "Whisper large-v3-turbo (on this Mac)":
      ```sh
      VoiceToText/tools/get-model.sh   # installs whisper.cpp if missing, downloads the model (1.6 GB) and the Silero voice detector (1 MB)
      ```
@@ -114,11 +116,11 @@ without its optional parts (speech synthesis, diarization). The first build fetc
 
 | Model (Settings) | `vtt` id | Runs on | Cost | Notes |
 |---|---|---|---|---|
-| OpenAI gpt-4o-transcribe | `gpt-4o-transcribe` | OpenAI | Per minute of audio | Default. Most accurate. |
+| OpenAI gpt-4o-transcribe | `gpt-4o-transcribe` | OpenAI | Per minute of audio | Most accurate. |
 | OpenAI gpt-4o-mini-transcribe | `gpt-4o-mini-transcribe` | OpenAI | Cheaper | Slightly less accurate |
 | OpenAI whisper-1 | `whisper-1` | OpenAI | Per minute | The original hosted Whisper |
 | Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. The model stays loaded and long dictations are transcribed while you talk: about 0.5 s after you let go on an M4 Pro, for 4 s or 23 s. |
-| Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | Offline after a 610 MB download on the first pick. About 0.25 s after you let go for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
+| Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | **Default.** Offline after a 610 MB download the first time it is used. 0.08 s after you let go for a short dictation, 0.25 s for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
 
 The menu bar menu switches the language between Español and English in one click. With Whisper a fixed language is
 faster than detecting it, but speech in the other language comes back translated, so switch before you dictate. Parakeet
@@ -131,13 +133,22 @@ comes back as nothing heard. OpenAI uploads are limited to 25 MB, about 70 minut
 
 From letting go of the shortcut to the text, on an M4 Pro (`say` clips, median of 3 runs, `tools/latency.sh`):
 
-| Dictation | Whisper, before (whisper-cli per dictation) | Whisper, now | Parakeet Ultra |
+| Dictation | Whisper, before (whisper-cli per dictation) | Whisper, now | Parakeet Ultra (default) |
 |---|---|---|---|
-| Spanish, 4 s | 1.41 s | 0.53 s | 0.08 s (file) |
-| English, 3 s | 1.45 s | 0.50 s | 0.08 s (file, Español chosen) |
-| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | 0.25 s |
+| Spanish, 2–4 s | 1.41 s | 0.53 s | **0.08 s** |
+| English, 2–3 s | 1.45 s | 0.50 s | **0.08 s** (with Español chosen, not translated) |
+| Spanish, 7 s | | | **0.12 s** |
+| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | **0.25 s** |
 
-"File" is `vtt transcribe` on the clip; the 23 s row is a real dictation through the app's recorder (`--file-mic`).
+The Parakeet column is a dictation through the app (`vtt start` / `vtt stop`, the "microphone" playing the clip in real
+time), median of 5, without the paste (a few ms). With Parakeet the app is 6× faster than Whisper for a short
+dictation and 2× for a long one. Against the app before this work (whisper-cli, language detected) it is 17× faster
+for a short dictation and 7× for a long one.
+
+For comparison, [Phonon](https://github.com/infatoshi/phonon), the app this work started from, says about 65 ms from
+key-up to pasted text on an M4 Max, at any length, and that includes rewriting the text with a 1.7B model. It
+transcribes every 0.4 s while you talk, so at key-up only the last seconds are left. VoiceToText sends the whole
+recording at key-up, which is why a long dictation takes longer.
 
 #### Why Parakeet is faster
 
