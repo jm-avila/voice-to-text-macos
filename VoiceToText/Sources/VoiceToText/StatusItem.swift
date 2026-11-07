@@ -291,6 +291,17 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             menu.addItem(disabled("\(shortcut) is taken by another app. See Settings"))
         }
 
+        // One click between the two languages the person speaks. Pinning one is
+        // faster than detecting it, but speech in the other one comes out translated.
+        menu.addItem(.separator())
+        menu.addItem(.sectionHeader(title: "Language"))
+        let current = dictation.settings.language
+        for code in Self.quickLanguages + (Self.quickLanguages.contains(current) ? [] : [current]) {
+            let item = action(SettingsView.languageName(code)) { [dictation] in dictation.settings.language = code }
+            item.state = code == current ? .on : .off
+            menu.addItem(item)
+        }
+
         let recent = dictation.history.suffix(5).reversed()
         if !recent.isEmpty {
             menu.addItem(.separator())
@@ -310,6 +321,9 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
         menu.addItem(action("Settings…", key: ",") { [openSettings] in openSettings() })
         menu.addItem(action("Quit VoiceToText", key: "q") { NSApp.terminate(nil) })
     }
+
+    /// Spanish first: the default the person picked.
+    static let quickLanguages = ["es", "en"]
 
     private var headline: String {
         switch dictation.state {

@@ -17,14 +17,19 @@ final class Services {
     let hotkeys = HotkeyCenter.shared
     let loginItem = LoginItem()
     let dictation: Dictation
+    /// The local model, kept loaded while it is selected. nil with the fakes.
+    let server: WhisperServer?
     let shortcutRecorder: ShortcutRecorder
     let hud: RecordingHUD
     private(set) var statusItem: StatusItem!
     private(set) var settingsWindow: SettingsWindow!
 
-    init(recorder: AudioRecording, transcriber: Transcribing, pasteboard: NSPasteboard) {
+    init(recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing?, server: WhisperServer? = nil,
+         pasteboard: NSPasteboard) {
         store = Store()
-        dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, paster: Paster(pasteboard: pasteboard))
+        self.server = server
+        dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, streamer: streamer,
+                              paster: Paster(pasteboard: pasteboard))
         hud = RecordingHUD(dictation: dictation)
         shortcutRecorder = ShortcutRecorder(hotkeys: hotkeys, dictation: dictation)
         settingsWindow = SettingsWindow { [unowned self] in self }
@@ -44,20 +49,35 @@ final class Services {
     static func live() -> Services {
         let base = ProcessInfo.processInfo.environment["OPENAI_BASE_URL"].flatMap(URL.init(string:))
         let openAI = OpenAITranscriber(baseURL: base ?? URL(string: "https://api.openai.com/v1")!) { APIKey.read() }
-        let transcriber = RoutingTranscriber(openAI: openAI, local: LocalWhisperTranscriber())
-        return Services(recorder: MicRecorder(), transcriber: transcriber, pasteboard: .general)
+        let server = WhisperServer()
+        let transcriber = RoutingTranscriber(openAI: openAI, local: LocalTranscriber(server: server))
+        return Services(recorder: MicRecorder(), transcriber: transcriber, streamer: server, server: server, pasteboard: .general)
     }
 
     /// Fakes for the self-test and snapshots: no microphone, no network, a private pasteboard, silent.
     static func testing() -> Services {
-        let services = Services(recorder: FakeRecorder(), transcriber: FakeTranscriber(),
+        let transcriber = FakeTranscriber()
+        let services = Services(recorder: FakeRecorder(), transcriber: transcriber, streamer: transcriber,
                                 pasteboard: NSPasteboard(name: NSPasteboard.Name("com.jmavila.voicetotext.selftest")))
         services.dictation.paster.postsPaste = false
         services.dictation.sounds.audible = false
         return services
     }
 
+    /// The local model's server runs while the local model is selected, and
+    /// stops (freeing 1.6 GB) when another model is chosen.
+    func syncServer() {
+        guard let server else { return }
+        if dictation.settings.model == LocalWhisper.model, LocalWhisper.status == .ready {
+            Task { await server.start() }
+        } else {
+            server.stop()
+        }
+    }
+
     func start() {
+        syncServer()
+        dictation.onSettingsChange = { [unowned self] in syncServer() }
         permissions.startPolling()
         permissions.onChange = { [unowned self] in
             // Monitors added before Accessibility see nothing: add them again.
@@ -106,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        services.server?.stop()
         if SelfTest.requested { exit(SelfTest.exitCode) }
     }
 }

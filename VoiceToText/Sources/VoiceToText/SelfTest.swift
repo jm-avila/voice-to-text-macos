@@ -384,6 +384,62 @@ enum SelfTest {
         await dictation.cancel()
         services.settingsWindow.close()
 
+        // S-014 The local model: pieces are transcribed while you talk; key-up only sends the rest.
+        func tone(_ seconds: Double, _ amplitude: Float) -> [Float] {
+            (0..<Int(seconds * Double(WAV.rate))).map { amplitude * sin(Float($0) * 2 * .pi * 220 / Float(WAV.rate)) }
+        }
+        dictation.settings.model = LocalWhisper.model
+        dictation.settings.language = "es"
+        transcriber.resetPieces()
+        transcriber.pieceReply = .success("Una pieza.")
+        let filesBefore = transcriber.calls.count
+        try? await dictation.start()
+        check("S-014 the local model asks the mic for its audio as it arrives", recorder.streamed)
+        recorder.speak(tone(5, 0.3) + tone(1, 0.0005))
+        await wait(0.3)
+        check("S-014 a piece is transcribed during the dictation, in the chosen language",
+              transcriber.pieces.count == 1 && transcriber.pieces.first?.language == "es")
+        recorder.speak(tone(1, 0.3))
+        let streamed = result(await agent("stop"))
+        check("S-014 at key-up only the rest is sent, with the text before it as prompt, and no whole file",
+              transcriber.pieces.count == 2 && transcriber.pieces.last?.prompt == "Una pieza." && transcriber.calls.count == filesBefore
+                && streamed?["text"] as? String == "Una pieza. Una pieza.")
+        check("S-014 stop reports key-up to text in ms", (streamed?["latencyMs"] as? Int).map { $0 >= 0 && $0 < 1000 } == true)
+
+        transcriber.pieceReply = .failure(TranscriptionError.local("whisper-server: gone"))
+        transcriber.reply = .success("The whole file.")
+        try? await dictation.start()
+        recorder.speak(tone(5, 0.3) + tone(1, 0.0005))
+        await wait(0.3)
+        check("S-014 a failed piece falls back to the whole file", (try? await dictation.stop(paste: false)) == "The whole file."
+                && transcriber.calls.count == filesBefore + 1)
+
+        transcriber.isReady = false
+        try? await dictation.start()
+        check("S-014 with the server not loaded yet, nothing streams", !recorder.streamed)
+        _ = try? await dictation.stop(paste: false)
+        transcriber.isReady = true
+        dictation.settings.model = "gpt-4o-transcribe"
+        try? await dictation.start()
+        check("S-014 OpenAI models never stream", !recorder.streamed)
+        await dictation.cancel()
+        transcriber.pieceReply = .success("Piece.")
+
+        // S-015 One click between Spanish and English in the menu.
+        let languages = NSMenu()
+        icon.menuNeedsUpdate(languages)
+        func languageItem(_ title: String) -> NSMenuItem? { languages.items.first { $0.title == title } }
+        let english = languageItem(SettingsView.languageName("en"))
+        check("S-015 the menu lists Español and English, the current one ticked",
+              languageItem(SettingsView.languageName("es"))?.state == .on && english?.state == .off)
+        english.map { _ = ($0.target as? NSObject)?.perform($0.action) }
+        check("S-015 a click switches the language and saves it",
+              dictation.settings.language == "en" && Store(directory: store.directory).loadSettings().language == "en")
+        dictation.settings.language = "fr"
+        icon.menuNeedsUpdate(languages)
+        check("S-015 another language from Settings shows too, ticked", languageItem(SettingsView.languageName("fr"))?.state == .on)
+        dictation.settings = DictationSettings()
+
         // Every SF Symbol the app uses exists.
         let symbols = ["waveform", "mic", "mic.fill", "checkmark", "xmark", "checkmark.circle.fill", "doc.on.clipboard", "ear",
                        "xmark.circle", "xmark.circle.fill", "exclamationmark.triangle.fill"]

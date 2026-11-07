@@ -116,21 +116,28 @@ final class Dictation {
     private(set) var canRetry = false
     /// How many tries failed so far. The menu bar dot shows until the menu opens after one.
     private(set) var failures = 0
+    /// Key-up to text of the last dictation: how fast it felt.
+    private(set) var lastLatency: Duration?
     var settings: DictationSettings {
         didSet {
             guard settings != oldValue else { return }
             store.save(settings)
             onChange()   // the menu bar icon follows clickToDictate and hideWhenIdle
+            onSettingsChange()
         }
     }
 
     @ObservationIgnored let store: Store
     @ObservationIgnored let recorder: AudioRecording
     @ObservationIgnored let transcriber: Transcribing
+    /// The local model's server: pieces go to it while the person talks. nil: whole files only.
+    @ObservationIgnored let streamer: ChunkTranscribing?
     @ObservationIgnored let paster: Paster
     @ObservationIgnored let sounds = Sounds()
     /// Runs after every change of state or notice: the status item and HUD redraw.
     @ObservationIgnored var onChange: () -> Void = {}
+    /// Runs after the settings change: the local model's server starts or stops with the model.
+    @ObservationIgnored var onSettingsChange: () -> Void = {}
     /// True when the hotkey, the menu, or a click must not start: the mic or
     /// paste is missing. It shows the person what to allow instead. The CLI skips it.
     @ObservationIgnored var blocked: () -> Bool = { false }
@@ -138,11 +145,14 @@ final class Dictation {
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// A cancel still stopping the recorder. The next start waits for it.
     @ObservationIgnored private var canceling: Task<Void, Never>?
+    /// The dictation being transcribed while it is spoken (local model, server ready).
+    @ObservationIgnored private var stream: StreamingTranscription?
 
-    init(store: Store, recorder: AudioRecording, transcriber: Transcribing, paster: Paster) {
+    init(store: Store, recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing? = nil, paster: Paster) {
         self.store = store
         self.recorder = recorder
         self.transcriber = transcriber
+        self.streamer = streamer
         self.paster = paster
         settings = store.loadSettings()
         history = store.loadHistory()
@@ -170,13 +180,19 @@ final class Dictation {
         canRetry = false
         update(.starting)
         await canceling?.value
+        let stream = makeStream()
+        self.stream = stream
         do {
-            try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout)
+            // A method of the stream, not a closure written here: this file runs on
+            // the main actor, and the samples arrive on the recorder's queue.
+            try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout, onAudio: stream?.append)
         } catch {
+            dropStream()
             fail(error)
             throw error
         }
         if cancelRequested {
+            dropStream()
             await recorder.cancel()
             update(.idle, notice: .canceled)
             throw DictationError.canceled
@@ -191,12 +207,18 @@ final class Dictation {
         guard case .recording = state else { throw DictationError.notRecording }
         // The cue plays on the press: capture ends right after it.
         if settings.sounds { sounds.play(.stop) }
+        let keyUp = ContinuousClock.now
         update(.transcribing)
-        guard await recorder.stop() >= Self.shortest else {
+        // After the recorder stopped: every sample is in the stream and the file is finished.
+        let recorded = await recorder.stop()
+        let stream = self.stream
+        self.stream = nil
+        guard recorded >= Self.shortest else {
+            stream?.cancel()
             update(.idle, notice: .nothingHeard)
             return ""
         }
-        return try await transcribeRecording(paste: paste)
+        return try await transcribeRecording(paste: paste, stream: stream, since: keyUp)
     }
 
     /// Sends the kept recording again, after a failure (network, key).
@@ -204,7 +226,7 @@ final class Dictation {
         guard state == .idle else { throw DictationError.busy(state.name) }
         guard canRetry else { throw DictationError.nothingToRetry }
         update(.transcribing)
-        return try await transcribeRecording(paste: paste)
+        return try await transcribeRecording(paste: paste, since: .now)
     }
 
     /// Throws the recording away. While the mic is still opening, it stops
@@ -216,6 +238,7 @@ final class Dictation {
         case .recording:
             // Idle first, so a press while the recorder stops cannot also stop and transcribe.
             update(.idle, notice: .canceled)
+            dropStream()
             let task = Task { [recorder] in await recorder.cancel() }
             canceling = task
             await task.value
@@ -263,10 +286,30 @@ final class Dictation {
         update(state, notice: .copied)
     }
 
-    private func transcribeRecording(paste: Bool) async throws -> String {
+    /// A stream when the local model's server is ready: the language is the one chosen at the start.
+    private func makeStream() -> StreamingTranscription? {
+        guard settings.model == LocalWhisper.model, let streamer, streamer.isReady else { return nil }
+        let language = settings.languageCode
+        return StreamingTranscription { wav, prompt in
+            try await streamer.transcribe(wav: wav, language: language, prompt: prompt)
+        }
+    }
+
+    private func dropStream() {
+        stream?.cancel()
+        stream = nil
+    }
+
+    /// The streamed text, or the whole file when there was no stream or a piece failed.
+    private func transcribeRecording(paste: Bool, stream: StreamingTranscription? = nil, since start: ContinuousClock.Instant) async throws -> String {
         let text: String
         do {
-            text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
+            if let stream, let streamed = try? await stream.finish() {
+                text = streamed
+            } else {
+                text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
+            }
+            lastLatency = start.duration(to: .now)
         } catch {
             canRetry = FileManager.default.fileExists(atPath: store.recordingURL.path)
             fail(error)
