@@ -202,6 +202,9 @@ final class HotkeyCenter {
     @ObservationIgnored private var monitors: [Any] = []
     @ObservationIgnored private var tap = ModifierTap(0)
     @ObservationIgnored private var action: (() -> Void)?
+    /// A modifiers-only shortcut's press (before it fires on release) and a press
+    /// that turned out to be another shortcut. Keyed shortcuts fire on the press.
+    @ObservationIgnored var onEarly: ((ModifierTap.Event) -> Void)?
     @ObservationIgnored private var handlerInstalled = false
 
     /// A modifiers-only tap also needs Accessibility: without it the monitors see nothing.
@@ -257,6 +260,9 @@ final class HotkeyCenter {
 
     func fire() { action?() }
 
+    /// A hold past the early mic's limit is not a tap: its release (or a missed one) fires nothing.
+    func spoilTap() { _ = tap.otherInput() }
+
     /// Global monitors see other apps' events, the local one this app's (Settings).
     private func watchTap(_ modifiers: UInt32) {
         tap = ModifierTap(modifiers)
@@ -274,10 +280,11 @@ final class HotkeyCenter {
 
     func handleTap(_ event: NSEvent) {
         guard !monitors.isEmpty else { return }
-        if event.type == .flagsChanged {
-            if tap.changed(to: Shortcut.modifiers(event.modifierFlags)) { fire() }
-        } else {
-            tap.otherInput()
+        let tapEvent = event.type == .flagsChanged ? tap.changed(to: Shortcut.modifiers(event.modifierFlags)) : tap.otherInput()
+        switch tapEvent {
+        case .released?: fire()
+        case let early?: onEarly?(early)
+        case nil: break
         }
     }
 

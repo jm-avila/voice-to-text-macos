@@ -147,6 +147,8 @@ final class Dictation {
     /// True when the hotkey, the menu, or a click must not start: the mic or
     /// paste is missing. It shows the person what to allow instead. The CLI skips it.
     @ObservationIgnored var blocked: () -> Bool = { false }
+    /// The mic and paste are allowed, asked without showing anything (for `openEarly`).
+    @ObservationIgnored var ready: () -> Bool = { true }
     @ObservationIgnored private var cancelRequested = false
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     /// A cancel still stopping the recorder. The next start waits for it.
@@ -155,6 +157,8 @@ final class Dictation {
     @ObservationIgnored private var stream: StreamingTranscription?
     /// The dictation's samples, kept for Parakeet.
     @ObservationIgnored private var buffer: SampleBuffer?
+    /// The mic opened on the press of a modifiers-only shortcut, before it fired.
+    @ObservationIgnored private var early: Task<Void, Error>?
 
     init(store: Store, recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing? = nil,
          sampler: SampleTranscribing? = nil, paster: Paster) {
@@ -176,28 +180,66 @@ final class Dictation {
     /// while the mic opens or while transcribing are ignored.
     func toggle() async {
         switch state {
-        case .idle: if !blocked() { try? await start() }
+        case .idle:
+            if !blocked() { try? await start(adoptingEarly: true) } else { await dropEarly()?.value }
         case .recording: _ = try? await stop(paste: true)
-        case .starting, .transcribing: break
+        // A release that starts nothing must not leave its press's mic open.
+        case .starting, .transcribing: dropEarly()
         }
     }
 
-    /// Returns once the mic is live.
-    func start() async throws {
+    /// A modifiers-only shortcut is held: the mic starts opening now, before
+    /// it is let go (that is when it fires). Nothing shows until then. If it was
+    /// another shortcut (⌥⌘I), `dropEarly` throws the audio away.
+    func openEarly() {
+        // Opening the mic deletes the kept recording, which a failed one needs for Retry.
+        guard state == .idle, early == nil, !canRetry, ready() else { return }
+        let opening = openMic()
+        early = opening
+        // Held and never let go, or the release was missed: never leave the mic open unseen.
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.earlyLimit)
+            guard let self, self.early == opening else { return }
+            self.dropEarly()
+            self.onEarlyExpired()
+        }
+    }
+
+    /// The early mic hit its limit: a hold that long is not a tap, so its release must not start.
+    @ObservationIgnored var onEarlyExpired: () -> Void = {}
+
+    /// How long the mic may stay open before the shortcut fires.
+    static let earlyLimit: Duration = .seconds(3)
+
+    /// The early mic was not for dictating: close it and forget what it heard.
+    /// At once (a press right after can open it again); the task finishes closing it.
+    /// Whatever the state: only `start` takes `early`, so its stream and buffer are still its own.
+    @discardableResult
+    func dropEarly() -> Task<Void, Never>? {
+        guard let early else { return nil }
+        self.early = nil
+        dropStream()
+        let task = Task { [recorder] in
+            _ = try? await early.value
+            await recorder.cancel()
+        }
+        canceling = task
+        return task
+    }
+
+    /// Returns once the mic is live. Only the shortcut's release adopts the mic its
+    /// press opened: anything else (the CLI) would get speech from before it started.
+    func start(adoptingEarly: Bool = false) async throws {
         guard state == .idle else { throw DictationError.busy(state.name) }
+        if !adoptingEarly { dropEarly() }
         cancelRequested = false
         // Starting replaces the kept recording, so it cannot be retried any more.
         canRetry = false
         update(.starting)
-        await canceling?.value
-        let stream = makeStream()
-        self.stream = stream
-        let buffer = stream == nil && settings.model == Parakeet.model && sampler != nil ? SampleBuffer() : nil
-        self.buffer = buffer
+        let opening = early ?? openMic()
+        early = nil
         do {
-            // A method of the stream or buffer, not a closure written here: this file runs
-            // on the main actor, and the samples arrive on the recorder's queue.
-            try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout, onAudio: stream?.append ?? buffer?.append)
+            try await opening.value
         } catch {
             dropStream()
             fail(error)
@@ -211,6 +253,22 @@ final class Dictation {
         }
         update(.recording(since: .now))
         if settings.sounds { sounds.play(.start) }
+    }
+
+    /// Starts the recorder, with the stream (Whisper) or buffer (Parakeet) for its samples.
+    private func openMic() -> Task<Void, Error> {
+        let stream = makeStream()
+        self.stream = stream
+        let buffer = stream == nil && settings.model == Parakeet.model && sampler != nil ? SampleBuffer() : nil
+        self.buffer = buffer
+        // A method of the stream or buffer, not a closure written here: this file runs
+        // on the main actor, and the samples arrive on the recorder's queue.
+        let onAudio = stream?.append ?? buffer?.append
+        let url = store.recordingURL
+        return Task { [recorder, canceling] in
+            await canceling?.value
+            try await recorder.start(to: url, timeout: Self.micTimeout, onAudio: onAudio)
+        }
     }
 
     /// Stops, transcribes, and saves to history. `paste` puts the text in

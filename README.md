@@ -199,7 +199,7 @@ tools/latency.sh --file-mic                  # whisper-cli vs the loaded model v
 
 | Action | How |
 |---|---|
-| Start dictating | ⌃. (wait for the Tink and the red mic; the pill says "Opening the mic… wait" until then) |
+| Start dictating | ⌃. (wait for the Tink and the red "Speak now"; the pill says "Opening the mic… wait" until then). With ⌥⌘ (Settings › Shortcut) the mic opens while you hold the keys, so you can talk as you let go. |
 | Stop, transcribe, paste | ⌃. again |
 | Cancel | Menu › Cancel Recording, or `vtt cancel` |
 | Retry after an error | Menu › Retry Last Recording (re-sends the saved recording) |

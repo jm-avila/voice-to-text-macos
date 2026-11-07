@@ -56,6 +56,8 @@ enum Snapshot {
                     await pause(0.5)
                     shoot("hud-starting", mode)
                     await starting.value
+                    await pause(0.3)
+                    shoot("hud-speak", mode)   // the mic just went live
                     await pause(1.4)
                     shoot("hud-recording", mode)
                     // Transcribing, then pasted.
