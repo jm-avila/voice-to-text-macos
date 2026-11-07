@@ -12,13 +12,19 @@ public struct DictationSettings: Codable, Equatable, Sendable {
     public var sounds = true
     /// Starts and stops dictation from any app.
     public var shortcut = Shortcut.standard
+    /// A click on the menu bar icon starts and stops dictation; right-click or ⌥-click opens the menu.
+    public var clickToDictate = false
+    /// The menu bar icon shows only while dictating (or after a failure).
+    public var hideWhenIdle = false
 
     public init(model: String = "gpt-4o-transcribe", language: String = "", sounds: Bool = true,
-                shortcut: Shortcut = .standard) {
+                shortcut: Shortcut = .standard, clickToDictate: Bool = false, hideWhenIdle: Bool = false) {
         self.model = model
         self.language = language
         self.sounds = sounds
         self.shortcut = shortcut
+        self.clickToDictate = clickToDictate
+        self.hideWhenIdle = hideWhenIdle
     }
 
     /// The name in the Settings picker.
@@ -35,6 +41,8 @@ public struct DictationSettings: Codable, Equatable, Sendable {
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? model
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? language
         sounds = try container.decodeIfPresent(Bool.self, forKey: .sounds) ?? sounds
+        clickToDictate = try container.decodeIfPresent(Bool.self, forKey: .clickToDictate) ?? clickToDictate
+        hideWhenIdle = try container.decodeIfPresent(Bool.self, forKey: .hideWhenIdle) ?? hideWhenIdle
         // A bad shortcut (edited by hand) falls back to ⌃. instead of losing the other settings.
         if let saved = try? container.decodeIfPresent(Shortcut.self, forKey: .shortcut), saved.problem == nil {
             shortcut = saved

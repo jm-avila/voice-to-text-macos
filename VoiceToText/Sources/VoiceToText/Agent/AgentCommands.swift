@@ -61,10 +61,12 @@ enum AgentCommands {
             return ["entries": history.suffix(limit).reversed().map { ["date": $0.date, "text": $0.text] },
                     "total": history.count, "file": services.store.historyURL.path]
         },
-        AgentCommand(name: "settings update", summary: "Change the model, the language, or the sounds. Only the options you give change.",
+        AgentCommand(name: "settings update", summary: "Change the model, the language, the sounds, or the menu bar icon. Only the options you give change.",
                      params: [.init(name: "model", help: DictationSettings.models.joined(separator: ", ")),
                               .init(name: "language", help: "a two-letter ISO 639-1 code like en or es, or auto to detect it"),
-                              .init(name: "sounds", kind: .boolean, help: "Tink when the mic is live, Pop when it stops")],
+                              .init(name: "sounds", kind: .boolean, help: "Tink when the mic is live, Pop when it stops"),
+                              .init(name: "click-to-dictate", kind: .boolean, help: "a click on the menu bar icon starts and stops dictation"),
+                              .init(name: "hide-when-idle", kind: .boolean, help: "show the menu bar icon only while dictating")],
                      example: "vtt settings update --language es --json") { args, services in
             // Check every option before changing anything.
             var settings = services.dictation.settings
@@ -81,8 +83,11 @@ enum AgentCommands {
                 settings.language = language == "auto" ? "" : language
             }
             if let sounds = try args.bool("sounds") { settings.sounds = sounds }
+            if let click = try args.bool("click-to-dictate") { settings.clickToDictate = click }
+            if let hide = try args.bool("hide-when-idle") { settings.hideWhenIdle = hide }
             services.dictation.settings = settings
-            return ["model": settings.model, "language": settings.languageCode ?? "auto", "sounds": settings.sounds]
+            return ["model": settings.model, "language": settings.languageCode ?? "auto", "sounds": settings.sounds,
+                    "clickToDictate": settings.clickToDictate, "hideWhenIdle": settings.hideWhenIdle]
         },
     ]
 }
@@ -95,6 +100,8 @@ extension Services {
             "model": dictation.settings.model,
             "language": dictation.settings.languageCode ?? "auto",
             "sounds": dictation.settings.sounds,
+            "clickToDictate": dictation.settings.clickToDictate,
+            "hideWhenIdle": dictation.settings.hideWhenIdle,
             "microphone": permissions.microphone.rawValue,
             "accessibility": permissions.accessibility,
             "shortcut": hotkeys.combo.symbols,

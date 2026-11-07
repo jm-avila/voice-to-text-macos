@@ -43,6 +43,9 @@ enum Snapshot {
             func pause(_ seconds: Double) async { try? await Task.sleep(for: .seconds(seconds)) }
             @MainActor func shoot(_ name: String, _ mode: String) {
                 capture(to: "\(dir)/\(name)-\(mode).png", window: services.hud.window, activate: false)
+                // The menu bar icon in the same state (the menu bar follows the wallpaper, not the mode).
+                capture(to: "\(dir)/menubar-\(name.replacingOccurrences(of: "hud-", with: ""))-\(mode).png",
+                        window: services.statusItem.window, activate: false)
             }
             if wanted("hud") {
                 for mode in ["light", "dark"] {
@@ -80,6 +83,7 @@ enum Snapshot {
                     await pause(0.2)
                     shoot("hud-error", mode)
                     await pause(4.2)
+                    capture(to: "\(dir)/menubar-failed-\(mode).png", window: services.statusItem.window, activate: false)
                 }
             }
             if wanted("settings") {

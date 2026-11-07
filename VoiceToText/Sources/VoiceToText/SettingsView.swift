@@ -125,6 +125,14 @@ struct SettingsView: View {
                     Text("Sounds")
                     Text("Tink when the mic is live, Pop when it stops.")
                 }
+                Toggle(isOn: $dictation.settings.clickToDictate) {
+                    Text("Click Icon to Dictate")
+                    Text("Right-click or ⌥-click the icon for the menu.")
+                }
+                Toggle(isOn: $dictation.settings.hideWhenIdle) {
+                    Text("Hide Icon When Idle")
+                    Text("It shows while dictating. Open VoiceToText again for Settings.")
+                }
                 Toggle("Open at Login", isOn: Binding(get: { login.isEnabled }, set: { login.set($0) }))
                 if login.needsApproval || login.error != nil {
                     Text(login.error ?? "Allow VoiceToText in System Settings › General › Login Items.")

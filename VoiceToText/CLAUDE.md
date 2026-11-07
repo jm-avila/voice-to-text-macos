@@ -9,14 +9,14 @@ version one folder up (`../SPEC.md`) and shares its files.
 - `Sources/VoiceToText/` the app.
   - `Dictation.swift` the one state machine (idle, starting, recording, transcribing). Hotkey, menu, and CLI all go through it.
   - `Recorder.swift` the mic (`AudioRecording`), `SystemHooks.swift` hotkey, permissions, ⌘V.
-  - `StatusItem.swift` the menu bar icon and menu, `HUD.swift` the floating pill, `SettingsView.swift` the one Settings window.
+  - `StatusItem.swift` the menu bar icon (level + timer, dots, ✓/✕, failure dot; click to dictate, hide when idle, file drop) and menu, `HUD.swift` the floating pill, `SettingsView.swift` the one Settings window.
   - `App.swift` wires `Services` (live, or `testing()` with the fakes in `Fakes.swift`).
   - `Agent/` the `vtt` CLI, its socket, and the MCP server. Commands live in `Agent/AgentCommands.swift`.
 - `Sources/VoiceToTextKit/` logic with no AppKit: transcript cleanup, `history.md` format, the OpenAI request, the local whisper-cli transcriber (`LocalWhisper.swift`), settings. Tests in `Tests/VoiceToTextKitTests/`.
 - `Package.swift` a Swift package. There is no Xcode project.
 - `build.sh` builds, signs (ad hoc), installs `~/Applications/VoiceToText.app`, and links `~/.local/bin/vtt`.
 - `tools/draw_icon.swift` the icon, drawn in code. `build.sh` turns it into `Resources/AppIcon.icns`.
-- `docs/` the brief and the user stories (S-001…S-011).
+- `docs/` the brief and the user stories (S-001…S-012).
 
 ## Files
 
@@ -36,7 +36,7 @@ This Mac has Command Line Tools only (no Xcode). See the `mac-app` skill for the
 - Self-test with fakes (no mic, no API, no paste): `tools/selftest.sh`. Exit 0 when every check passes. Add a check per story to `SelfTest.swift`.
 - End to end against the real API (a few `say` clips): `tools/e2e.sh`. `--mic` also records 3 s from the real mic.
 - Agent CLI rules: `APP_STORE=/tmp/VoiceToText-cli.store ~/Repositories/references/bama/skills/code/agent-cli/scripts/check-agent-cli.sh vtt`
-- Snapshots: `tools/snap.sh` writes `/tmp/VoiceToText-shots/hud-<state>-light|dark.png` and `settings-light|dark.png`. Open and judge every one after a UI change.
+- Snapshots: `tools/snap.sh` writes `/tmp/VoiceToText-shots/hud-<state>-light|dark.png`, `menubar-<state>-…png` (drawn from the view: the menu bar window can't be screencaptured) and `settings-light|dark.png`. Open and judge every one after a UI change.
 - Grid: `tools/grid-lint.sh && swift tools/check-layout.swift /tmp/VoiceToText-shots/*-layout.json`
 - Never test against the real store. Self-test, seed data, and snapshots refuse without `APP_STORE`.
 

@@ -90,3 +90,14 @@ Acceptance:
 - [snap] Settings shows the changed shortcut with Reset, and the recording state with a refused press.
 - [manual] The new shortcut starts and stops dictation in another app; one another app owns is refused and the old one stays.
 Status: done
+
+### S-012 A menu bar icon that says more
+As the user, I glance at the menu bar and see how long I've been talking and whether it worked; I can dictate with a click, hide the icon, or drop a file on it.
+Acceptance:
+- [self] Recording shows the level and the time (not a mic: macOS already shows an orange one); transcribing shows dots; ✓ after a paste or copy, ✕ after a failure.
+- [self] A failure leaves a red dot until the menu opens; a good try clears it.
+- [self] Click to dictate and hide when idle are off by default, saved, and set by `vtt settings update`; a hidden icon shows while dictating and after a failure.
+- [self] A dropped audio or video file is transcribed, saved, and copied; other files are refused.
+- [snap] `menubar-<state>` shots for every state, with the dot.
+- [manual] A real click, right-click, ⌥-click and a file drag on the icon.
+Status: done

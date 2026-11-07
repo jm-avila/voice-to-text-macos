@@ -27,7 +27,11 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
   - Local: **Whisper large-v3-turbo** through whisper.cpp. No key, no network, no cost.
 - **Any language** the model supports. Detects the language by default, or set one (English, Spanish, Catalan, French, German, Italian, Portuguese).
 - **A small pill at the bottom of the screen** while dictating, with a level meter and a timer, then "Pasted", "Copied" or the error. It never takes focus, so the text lands in the app you were typing in.
-- **Menu bar icon** that shows the state. The menu has:
+- **Menu bar icon** that shows the state: a waveform when ready, the input level and a timer while recording (not a second mic next to macOS's orange one), three moving dots while transcribing, then ✓ or ✕ for a moment. A red dot stays after a failed try until you open the menu.
+  - **Click Icon to Dictate** (Settings, off by default): a click starts and stops; right-click or ⌥-click opens the menu.
+  - **Hide Icon When Idle** (Settings, off by default): the icon shows only while dictating or after a failure. Open the app again for Settings.
+  - **Drop an audio or video file** on the icon to transcribe it: the text is copied and saved to history.
+- The menu has:
   - Start Dictation, Stop and Paste, Cancel Recording, and Retry Last Recording (re-sends it after an error).
   - The last 5 transcripts (click one to copy it).
   - Open History, Settings (⌘,) and Quit.
