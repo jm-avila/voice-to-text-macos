@@ -1,7 +1,8 @@
 # VoiceToText
 
 Push-to-talk dictation for macOS. Press **⌃.** (control + period), speak, press **⌃.** again: the text is pasted where
-your cursor is. It transcribes with OpenAI, or fully offline with Whisper large-v3-turbo running on your Mac.
+your cursor is. It transcribes with OpenAI, or fully offline on your Mac with Parakeet Ultra (the fastest) or Whisper
+large-v3-turbo.
 
 A native Swift menu bar app with no Dock icon and no main window. The original Hammerspoon + bash version is still in
 this repo ([below](#legacy-hammerspoon--bash-version)).
@@ -24,7 +25,9 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 - **Pastes at the cursor.** The text also stays on the clipboard.
 - **Two kinds of model:**
   - OpenAI: `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`.
-  - Local: **Whisper large-v3-turbo** through whisper.cpp. No key, no network, no cost.
+  - Local, no key, no network, no cost:
+    - **Parakeet Ultra** through FluidAudio, on the Neural Engine. The fastest: text about 0.25 s after you let go.
+    - **Whisper large-v3-turbo** through whisper.cpp.
 - **Any language** the model supports. Detects the language by default, or set one (English, Spanish, Catalan, French, German, Italian, Portuguese).
 - **A small pill at the bottom of the screen** while dictating, with a level meter and a timer, then "Pasted", "Copied" or the error. It never takes focus, so the text lands in the app you were typing in.
 - **Menu bar icon** that shows the state: a waveform when ready, the input level and a timer while recording (not a second mic next to macOS's orange one), three moving dots while transcribing, then ✓ or ✕ for a moment. A red dot stays after a failed try until you open the menu.
@@ -47,8 +50,8 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 | Mac | Apple Silicon recommended | Tested on an M4 Pro. Intel is untested. |
 | Build tools | Xcode Command Line Tools with Swift 6.2+ | Built and tested with Swift 6.4 (CLT 27.0). Full Xcode is not needed. |
 | OpenAI API key | | Only for the OpenAI models. |
-| Homebrew + whisper.cpp | whisper.cpp 1.9.5 tested | Only for the local model. `tools/get-model.sh` installs it. |
-| Disk | ~1.7 GB | Only for the local model files. |
+| Homebrew + whisper.cpp | whisper.cpp 1.9.5 tested | Only for local Whisper. `tools/get-model.sh` installs it. |
+| Disk | ~1.7 GB (Whisper), 610 MB (Parakeet) | Only for the local models you use. Parakeet downloads itself the first time you pick it. |
 
 ## Permissions
 
@@ -87,7 +90,9 @@ cd voice-to-text-macos/VoiceToText
 | `./build.sh --open` | Install, then quit the running copy and open the new one |
 | `SIGN_IDENTITY="Apple Development: …" ./build.sh` | Sign with a specific certificate |
 
-It is a plain Swift package (`Package.swift`) with no Xcode project and no third-party dependencies.
+It is a plain Swift package (`Package.swift`) with no Xcode project. Its one dependency is
+[FluidAudio](https://github.com/FluidInference/FluidAudio) (Apache 2.0) for Parakeet, pinned to a commit and built
+without its optional parts (speech synthesis, diarization). The first build fetches and compiles it (about 2 minutes).
 
 ## Set up
 
@@ -113,9 +118,11 @@ It is a plain Swift package (`Package.swift`) with no Xcode project and no third
 | OpenAI gpt-4o-mini-transcribe | `gpt-4o-mini-transcribe` | OpenAI | Cheaper | Slightly less accurate |
 | OpenAI whisper-1 | `whisper-1` | OpenAI | Per minute | The original hosted Whisper |
 | Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. The model stays loaded and long dictations are transcribed while you talk: about 0.5 s after you let go on an M4 Pro, for 4 s or 23 s. |
+| Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | Offline after a 610 MB download on the first pick. About 0.25 s after you let go for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
 
-The menu bar menu switches the language between Español and English in one click. A fixed language is faster than
-detecting it, but speech in the other language comes back translated, so switch before you dictate.
+The menu bar menu switches the language between Español and English in one click. With Whisper a fixed language is
+faster than detecting it, but speech in the other language comes back translated, so switch before you dictate. Parakeet
+only uses it as a hint for the alphabet, and never translates.
 
 The local model uses the Silero voice detector. Without it, Whisper "hears" "Thank you." in silence; with it, silence
 comes back as nothing heard. OpenAI uploads are limited to 25 MB, about 70 minutes.
@@ -124,11 +131,23 @@ comes back as nothing heard. OpenAI uploads are limited to 25 MB, about 70 minut
 
 From letting go of the shortcut to the text, on an M4 Pro (`say` clips, median of 3 runs, `tools/latency.sh`):
 
-| Dictation | Before (whisper-cli per dictation) | Now | Faster |
+| Dictation | Whisper, before (whisper-cli per dictation) | Whisper, now | Parakeet Ultra |
 |---|---|---|---|
-| Spanish, 4 s | 1.41 s | 0.53 s | 2.7× |
-| English, 3 s | 1.45 s | 0.50 s | 2.9× |
-| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | 3.2× |
+| Spanish, 4 s | 1.41 s | 0.53 s | 0.08 s (file) |
+| English, 3 s | 1.45 s | 0.50 s | 0.08 s (file, Español chosen) |
+| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | 0.25 s |
+
+"File" is `vtt transcribe` on the clip; the 23 s row is a real dictation through the app's recorder (`--file-mic`).
+
+#### Why Parakeet is faster
+
+- Whisper pads every request to 30 s of audio, so even a 3 s dictation costs ~430 ms. Parakeet's work grows with the
+  audio: 35 ms for 2 s, 113 ms for 23 s (the model alone).
+- It writes the whole text in one pass (TDT) instead of word by word, on the Neural Engine.
+- It loads in 0.1 s and detects the language at no extra cost, so nothing has to be fixed or streamed: the whole
+  recording goes at key-up. The rest of the 0.25 s is closing the recording and reading it.
+
+#### Why Whisper got faster
 
 Where the time went, and what changed:
 
@@ -145,7 +164,7 @@ Measure your own dictations:
 
 ```sh
 vtt start --json; sleep 5; vtt stop --json   # latencyMs: key-up to text; streamed: whether it was cut while you talked
-tools/latency.sh --file-mic                  # whisper-cli vs the loaded model vs streaming, in a test copy
+tools/latency.sh --file-mic                  # whisper-cli vs the loaded model vs streaming vs Parakeet, in a test copy
 ```
 
 ## Use
@@ -267,4 +286,9 @@ To go back, quit VoiceToText and restore the line.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE).
+
+The Parakeet model is not in this repo: it downloads from Hugging Face on first use.
+[Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) (Moondream, post-trained from NVIDIA's
+[parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)) is licensed CC-BY-4.0; the Core ML build is
+[FluidInference/parakeet-ultra-coreml](https://huggingface.co/FluidInference/parakeet-ultra-coreml).

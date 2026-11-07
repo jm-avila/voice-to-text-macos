@@ -165,11 +165,17 @@ struct SettingsView: View {
                     case false?: Status(ok: false, text: "Missing")
                     }
                 }
-                LabeledContent("Local model") {
+                LabeledContent("Whisper (local)") {
                     switch permissions.localModel {
                     case .ready: Status(ok: true, text: "Downloaded")
                     case .noModel: Status(ok: false, text: "Not downloaded")
                     case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
+                    }
+                }
+                LabeledContent("Parakeet (local)") {
+                    switch permissions.parakeetModel {
+                    case .ready: Status(ok: true, text: "Downloaded")
+                    case .noModel: Status(ok: false, text: "Not downloaded")
                     }
                 }
                 // Missing ones are at the top, with their button.
@@ -199,7 +205,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         // Every row shows without scrolling on a 13" screen.
-        .fitsContent(max: 760)
+        .fitsContent(max: 860)
         .frame(width: 480)
         .task { keyFound = await Task.detached { APIKey.read() != nil }.value }
     }
@@ -210,7 +216,11 @@ struct SettingsView: View {
         if local, permissions.localModel != .ready {
             return "For the local model, run VoiceToText/tools/get-model.sh (whisper.cpp and 1.6 GB of model)."
         }
-        if !local, keyFound == false { return "Add your key: secret set OPENAI_API_KEY -p openai --clip" }
+        let parakeet = dictation.settings.model == Parakeet.model
+        if parakeet, permissions.parakeetModel != .ready {
+            return "Parakeet downloads once (610 MB) when you pick it. A dictation waits for it, or tries again."
+        }
+        if !local, !parakeet, keyFound == false { return "Add your key: secret set OPENAI_API_KEY -p openai --clip" }
         return "Accessibility lets VoiceToText paste. Without it, press ⌘V yourself."
     }
 

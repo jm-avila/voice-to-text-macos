@@ -1,8 +1,9 @@
 #!/bin/zsh
 # How fast the local model answers, in a test copy of the installed app
 # (APP_STORE in /tmp: never your history or settings, never the ⌃. shortcut).
-#   files  the same `say` clips through whisper-cli (model loaded each time)
-#          and through the app (model kept loaded by whisper-server)
+#   files  the same `say` clips through whisper-cli (model loaded each time),
+#          through the app (model kept loaded by whisper-server), and through
+#          Parakeet in the app (kept loaded; downloads 610 MB the first time)
 #   --mic  also dictates through the real microphone: `vtt start`, `say` plays
 #          a clip through the speakers, `vtt stop` reports key-up to text
 #          (latencyMs). Turn the volume up; macOS asks for mic access once.
@@ -73,7 +74,15 @@ for clip in es-short es-long en-short; do
     printf '%-10s %-16s %8s\n' $clip $route ${${(on)times}[$(( (runs + 1) / 2 ))]}
   done
 done
-echo "(server includes the vtt round trip and the m4a → wav conversion)"
+"$cli" settings update --model parakeet-ultra-local --language es --json >/dev/null
+for i in {1..600}; do [[ $(json "$("$cli" status --json)" "d['parakeetLoaded']") == True ]] && break; sleep 0.5; done
+for clip in es-short es-long en-short; do
+  times=()
+  for r in $(seq $runs); do times+=$(ms "$cli" transcribe "$work/$clip.m4a" --json); done
+  printf '%-10s %-16s %8s  %s\n' $clip parakeet ${${(on)times}[$(( (runs + 1) / 2 ))]} "$(json "$("$cli" transcribe "$work/$clip.m4a" --json)" "d['text'][:60]")"
+done
+"$cli" settings update --model whisper-large-v3-turbo-local --json >/dev/null
+echo "(server and parakeet include the vtt round trip and reading the m4a; parakeet ran with Español chosen)"
 
 if $mic; then
   echo
@@ -106,5 +115,13 @@ if $filemic; then
     printf '%-22s %10s  %s\n' "streamed=$(json "$stopped" "d.get('streamed')")" "$(json "$stopped" "d.get('latencyMs')")" "$(json "$stopped" "d['text'][:70]")…"
   done
   printf '%-22s %10s\n' "whole file (server)" "$(ms "$cli" transcribe "$work/pauses.m4a" --json)"
+  "$cli" settings update --model parakeet-ultra-local --json >/dev/null
+  for i in {1..600}; do [[ $(json "$("$cli" status --json)" "d['parakeetLoaded']") == True ]] && break; sleep 0.5; done
+  for r in $(seq $runs); do
+    "$cli" start --json >/dev/null
+    sleep $(( seconds + 0.3 ))
+    stopped=$("$cli" stop --json)
+    printf '%-22s %10s  %s\n' "parakeet" "$(json "$stopped" "d.get('latencyMs')")" "$(json "$stopped" "d['text'][:70]")…"
+  done
   unset APP_FAKE_MIC
 fi

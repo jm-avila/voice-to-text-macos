@@ -107,18 +107,25 @@ public struct LocalWhisperTranscriber: Transcribing {
     }
 }
 
-/// Sends each recording to OpenAI or to the local model, by the model chosen in Settings.
+/// Sends each recording to OpenAI or to a local model, by the model chosen in Settings.
 public struct RoutingTranscriber: Transcribing {
     public var openAI: Transcribing
     public var local: Transcribing
+    public var parakeet: Transcribing
 
-    public init(openAI: Transcribing, local: Transcribing) {
+    public init(openAI: Transcribing, local: Transcribing, parakeet: Transcribing) {
         self.openAI = openAI
         self.local = local
+        self.parakeet = parakeet
     }
 
     public func transcribe(_ file: URL, model: String, language: String?) async throws -> String {
-        try await (model == LocalWhisper.model ? local : openAI).transcribe(file, model: model, language: language)
+        let route = switch model {
+        case LocalWhisper.model: local
+        case Parakeet.model: parakeet
+        default: openAI
+        }
+        return try await route.transcribe(file, model: model, language: language)
     }
 }
 

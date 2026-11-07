@@ -425,6 +425,22 @@ enum SelfTest {
         await dictation.cancel()
         transcriber.pieceReply = .success("Piece.")
 
+        // S-016 Parakeet: the whole recording at key-up, no stream, with its model id and the language as a hint.
+        let beforeParakeet = dictation.settings
+        dictation.settings.model = Parakeet.model
+        dictation.settings.language = "es"
+        transcriber.reply = .success("Desde Parakeet.")
+        try? await dictation.start()
+        check("S-016 Parakeet does not stream (the whole dictation takes ~0.1 s)", !recorder.streamed)
+        check("S-016 Parakeet gets the whole recording with its model and language",
+              (try? await dictation.stop(paste: false)) == "Desde Parakeet."
+                && transcriber.calls.last?.model == Parakeet.model && transcriber.calls.last?.language == "es")
+        check("S-016 Settings and the CLI offer Parakeet by name",
+              DictationSettings.models.contains(Parakeet.model)
+                && DictationSettings.modelName(Parakeet.model).hasPrefix("Parakeet"))
+        transcriber.reply = .success("Hello from the fake transcriber.")
+        dictation.settings = beforeParakeet
+
         // S-015 One click between Spanish and English in the menu.
         let languages = NSMenu()
         icon.menuNeedsUpdate(languages)

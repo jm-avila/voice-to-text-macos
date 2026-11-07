@@ -132,3 +132,14 @@ Acceptance:
 - [manual] Pick English, dictate English; pick Español, dictate Spanish.
 Status: done
 
+### S-016 Parakeet, the fastest local model
+As the user, I pick Parakeet Ultra and my dictation is text about a quarter of a second after I let go, whatever the length, in Spanish or English without switching.
+Screens: Settings
+Acceptance:
+- [unit] Parakeet routes to its transcriber; the language is only a script hint; an empty recording fails without loading the model.
+- [unit] With the model downloaded: Spanish and English come back in their own language with Español chosen; switching away mid-transcription still returns that text and frees the model.
+- [self] Parakeet sends the whole recording at key-up (no stream), with its model id and language; Settings and the CLI offer it by name.
+- [e2e] Spanish, English with Español chosen (not translated), and silence (nothing heard).
+- [manual] Pick Parakeet (the first time it downloads 610 MB), dictate 20 s in Spanish, then a sentence in English without switching.
+Status: done
+

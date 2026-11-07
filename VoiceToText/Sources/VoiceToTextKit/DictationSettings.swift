@@ -2,7 +2,7 @@ import Foundation
 
 /// What people can change, saved as settings.json next to history.md.
 public struct DictationSettings: Codable, Equatable, Sendable {
-    public static let models = ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1", LocalWhisper.model]
+    public static let models = ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1", LocalWhisper.model, Parakeet.model]
     /// ISO 639-1 codes offered in Settings. "" lets the model detect the language.
     public static let languages = ["", "en", "es", "ca", "fr", "de", "it", "pt"]
 
@@ -29,7 +29,11 @@ public struct DictationSettings: Codable, Equatable, Sendable {
 
     /// The name in the Settings picker.
     public static func modelName(_ model: String) -> String {
-        model == LocalWhisper.model ? "Whisper large-v3-turbo (on this Mac)" : "OpenAI \(model)"
+        switch model {
+        case LocalWhisper.model: "Whisper large-v3-turbo (on this Mac)"
+        case Parakeet.model: "Parakeet Ultra (on this Mac, fastest)"
+        default: "OpenAI \(model)"
+        }
     }
 
     /// nil when the model should detect the language.
