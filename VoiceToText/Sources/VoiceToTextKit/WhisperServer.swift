@@ -12,7 +12,9 @@ public protocol ChunkTranscribing: Sendable {
 /// whisper.cpp's `whisper-server` (brew install whisper-cpp), kept running
 /// while the local model is selected, so a dictation does not wait for the
 /// 1.6 GB model to load. One fixed port: a server that already answers there
-/// (left by a crash, or the real app seen from a test copy) is used as is.
+/// (the real app's, seen from a test copy) is used as is and never stopped.
+/// The one this app starts runs under a small shell that stops it when the
+/// app exits, even after a crash, so no 1.6 GB copy is left behind.
 public final class WhisperServer: ChunkTranscribing, Sendable {
     public static let port = 8178
     /// Where Homebrew puts it. An app opened from Finder has no shell PATH.
@@ -29,6 +31,8 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         var process: Process?
         var ready = false
         var starting: Task<Bool, Never>?
+        /// The local model is selected. A start finishing after a stop must not keep it running.
+        var wanted = false
     }
     private let state = Mutex(State())
 
@@ -53,25 +57,35 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
     public var isReady: Bool { state.withLock { $0.ready } }
 
     /// Starts it unless one already answers. True once it answers (the model is loaded).
+    /// Starts whisper-server under a shell that stops it when this app (`pid`) is gone.
+    static let watchdog = """
+        "$@" & server=$!
+        trap 'kill $server 2>/dev/null; exit 0' TERM INT
+        while kill -0 "$APP_PID" 2>/dev/null && kill -0 $server 2>/dev/null; do /bin/sleep 1; done
+        kill $server 2>/dev/null
+        """
+
     @discardableResult
     public func start() async -> Bool {
         let task = state.withLock { state in
+            state.wanted = true
             if let starting = state.starting { return starting }
             let starting = Task { await self.launch() }
             state.starting = starting
             return starting
         }
         let ready = await task.value
-        state.withLock { state in
+        return state.withLock { state in
             state.starting = nil
-            state.ready = ready
+            state.ready = ready && state.wanted
+            return state.ready
         }
-        return ready
     }
 
     /// Stops the server this app started and frees its memory. Safe to call from any thread.
     public func stop() {
         state.withLock { state in
+            state.wanted = false
             state.process?.terminate()
             state.process = nil
             state.ready = false
@@ -83,18 +97,30 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         guard let executable = executable(),
               [modelURL, vadURL].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else { return false }
         let process = Process()
-        process.executableURL = executable
-        process.arguments = Self.arguments(model: modelURL, vad: vadURL, port: baseURL.port ?? Self.port)
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", Self.watchdog, "whisper-server", executable.path]
+            + Self.arguments(model: modelURL, vad: vadURL, port: baseURL.port ?? Self.port)
+        process.environment = ["APP_PID": String(ProcessInfo.processInfo.processIdentifier)]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return false }
-        state.withLock { $0.process = process }
+        // Under the lock: a stop that came first wins, and one that comes later finds the process.
+        let launched = state.withLock { state in
+            guard state.wanted, (try? process.run()) != nil else { return false }
+            state.process = process
+            return true
+        }
+        guard launched else { return false }
         // Loading the model takes about a second; a cold disk, longer.
         let deadline = ContinuousClock.now + .seconds(30)
         while ContinuousClock.now < deadline, process.isRunning {
             if await answers() { return true }
             try? await Task.sleep(for: .milliseconds(150))
         }
+        // Too slow: stop it rather than keep a copy loading next to whisper-cli's.
+        state.withLock { state in
+            if state.process === process { state.process = nil }
+        }
+        process.terminate()
         return false
     }
 
@@ -120,10 +146,11 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
             (data, response) = try await session.upload(for: request, from: form.body(wav: wav))
         } catch {
             // Gone (crashed, killed): whisper-cli takes over until it answers again.
-            if !Task.isCancelled {
-                state.withLock { $0.ready = false }
-                Task { await start() }
+            let restart = state.withLock { state in
+                state.ready = false
+                return state.wanted && !Task.isCancelled
             }
+            if restart { Task { await start() } }
             throw TranscriptionError.local("whisper-server: \(error.localizedDescription)")
         }
         return try WhisperServerRequest.interpret(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)

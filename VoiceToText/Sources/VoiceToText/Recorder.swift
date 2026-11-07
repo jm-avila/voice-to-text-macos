@@ -1,4 +1,5 @@
 import AVFoundation
+import Synchronization
 import VoiceToTextKit
 
 /// Records the microphone to a file. MicRecorder is the real one; the
@@ -44,7 +45,9 @@ nonisolated final class MicRecorder: AudioRecording, @unchecked Sendable {
     private var onAudio: (@Sendable ([Float]) -> Void)?
     /// Samples written, at 16 kHz.
     private var written: AVAudioFramePosition = 0
-    private var lastLevel: Float = 0
+    /// The float's bits: the meter reads it from the main thread without waiting
+    /// for the queue, which can be busy opening a new mic for seconds.
+    private let lastLevel = Atomic<UInt32>(0)
     private var configurationObserver: NSObjectProtocol?
 
     static let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
@@ -141,7 +144,7 @@ nonisolated final class MicRecorder: AudioRecording, @unchecked Sendable {
         let converted = Array(UnsafeBufferPointer(start: output.floatChannelData![0], count: Int(output.frameLength)))
         onAudio?(converted)
         let power = converted.reduce(Float(0)) { $0 + $1 * $1 } / Float(converted.count)
-        lastLevel = Meter.level(decibels: power > 0 ? 10 * log10(power) : -160)
+        lastLevel.store(Meter.level(decibels: power > 0 ? 10 * log10(power) : -160).bitPattern, ordering: .relaxed)
     }
 
     /// On the queue: no more audio. Dropping the file finishes it on disk.
@@ -154,7 +157,7 @@ nonisolated final class MicRecorder: AudioRecording, @unchecked Sendable {
         file = nil
         converter = nil
         onAudio = nil
-        lastLevel = 0
+        lastLevel.store(0, ordering: .relaxed)
     }
 
     func stop() async -> TimeInterval {
@@ -185,6 +188,6 @@ nonisolated final class MicRecorder: AudioRecording, @unchecked Sendable {
     }
 
     func level() -> Float {
-        queue.sync { lastLevel }
+        Float(bitPattern: lastLevel.load(ordering: .relaxed))
     }
 }

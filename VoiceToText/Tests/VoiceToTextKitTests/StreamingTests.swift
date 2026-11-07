@@ -170,12 +170,23 @@ final class ServerStub: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var reply: (status: Int, body: Data) = (200, Data())
     nonisolated(unsafe) static var down = false
     nonisolated(unsafe) static var lastBody = Data()
+    /// GET / answers after 300 ms: a server still loading.
+    nonisolated(unsafe) static var slowAnswer = false
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         if Self.down { return client!.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost)) }
+        if Self.slowAnswer, request.url?.path != "/inference" {
+            Self.slowAnswer = false
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { self.answer() }
+            return
+        }
+        answer()
+    }
+
+    private func answer() {
         let inference = request.url?.path == "/inference"
         if inference { Self.lastBody = request.httpBody ?? request.httpBodyStream.map(StubProtocol.read) ?? Data() }
         let status = inference ? Self.reply.status : 200
@@ -230,6 +241,18 @@ struct ResidentModel {
         let none = WhisperServer(session: ServerStub.session, executable: { nil })
         #expect(await none.start() == false && !none.isReady)
         ServerStub.down = false
+    }
+
+    @Test("A stop while it starts wins: the server is not ready afterwards")
+    func stopWhileStarting() async {
+        ServerStub.down = false
+        let server = WhisperServer(session: ServerStub.session, executable: { nil })
+        ServerStub.slowAnswer = true
+        defer { ServerStub.slowAnswer = false }
+        let started = Task { await server.start() }
+        try? await Task.sleep(for: .milliseconds(100))   // it is waiting for the server to answer
+        server.stop()
+        #expect(await started.value == false && !server.isReady)
     }
 
     @Test("Whole files go to the server when it is ready, else to whisper-cli; a failure falls back")
