@@ -20,15 +20,18 @@ final class Services {
     let dictation: Dictation
     /// The local model, kept loaded while it is selected. nil with the fakes.
     let server: WhisperServer?
+    /// Parakeet, kept loaded while it is selected. nil with the fakes.
+    let parakeet: ParakeetTranscriber?
     let shortcutRecorder: ShortcutRecorder
     let hud: RecordingHUD
     private(set) var statusItem: StatusItem!
     private(set) var settingsWindow: SettingsWindow!
 
     init(recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing?, server: WhisperServer? = nil,
-         pasteboard: NSPasteboard) {
+         parakeet: ParakeetTranscriber? = nil, pasteboard: NSPasteboard) {
         store = Store()
         self.server = server
+        self.parakeet = parakeet
         dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, streamer: streamer,
                               paster: Paster(pasteboard: pasteboard))
         hud = RecordingHUD(dictation: dictation)
@@ -51,11 +54,13 @@ final class Services {
         let base = ProcessInfo.processInfo.environment["OPENAI_BASE_URL"].flatMap(URL.init(string:))
         let openAI = OpenAITranscriber(baseURL: base ?? URL(string: "https://api.openai.com/v1")!) { APIKey.read() }
         let server = WhisperServer()
-        let transcriber = RoutingTranscriber(openAI: openAI, local: LocalTranscriber(server: server))
+        let parakeet = ParakeetTranscriber()
+        let transcriber = RoutingTranscriber(openAI: openAI, local: LocalTranscriber(server: server), parakeet: parakeet)
         // A test copy can take its "microphone" from a file (tools/latency.sh).
         let fakeMic = Store.isOverridden ? ProcessInfo.processInfo.environment["APP_FAKE_MIC"].map(URL.init(fileURLWithPath:)) : nil
         let recorder: AudioRecording = fakeMic.map(FileRecorder.init(source:)) ?? MicRecorder()
-        return Services(recorder: recorder, transcriber: transcriber, streamer: server, server: server, pasteboard: .general)
+        return Services(recorder: recorder, transcriber: transcriber, streamer: server, server: server,
+                        parakeet: parakeet, pasteboard: .general)
     }
 
     /// Fakes for the self-test and snapshots: no microphone, no network, a private pasteboard, silent.
@@ -68,14 +73,25 @@ final class Services {
         return services
     }
 
-    /// The local model's server runs while the local model is selected, and
-    /// stops (freeing 1.6 GB) when another model is chosen.
+    /// The local Whisper server runs while Whisper is selected, and stops (freeing
+    /// 1.6 GB) when another model is chosen. Parakeet loads (the first time,
+    /// downloads) when it is chosen and is freed when another one is.
     func syncServer() {
-        guard let server else { return }
-        if dictation.settings.model == LocalWhisper.model, LocalWhisper.status == .ready {
-            Task { await server.start() }
-        } else {
-            server.stop()
+        let model = dictation.settings.model
+        if let server {
+            if model == LocalWhisper.model, LocalWhisper.status == .ready {
+                Task { await server.start() }
+            } else {
+                server.stop()
+            }
+        }
+        if let parakeet {
+            if model == Parakeet.model {
+                // A failure (no network for the first download) shows at the next dictation, which loads again.
+                Task { try? await parakeet.load() }
+            } else {
+                parakeet.unload()
+            }
         }
     }
 
@@ -131,6 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         services.server?.stop()
+        services.parakeet?.unload()
         if SelfTest.requested { exit(SelfTest.exitCode) }
     }
 }

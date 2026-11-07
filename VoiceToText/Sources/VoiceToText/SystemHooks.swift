@@ -67,6 +67,8 @@ final class Permissions {
     }
     /// Polled too, so Settings shows "Downloaded" once tools/get-model.sh finishes.
     private(set) var localModel = LocalWhisper.status
+    /// Shows "Downloaded" once Parakeet's first download finishes.
+    private(set) var parakeetModel = Parakeet.status
     @ObservationIgnored private var timer: Timer?
 
     func startPolling() {
@@ -87,6 +89,8 @@ final class Permissions {
         if changed { onChange() }
         let local = LocalWhisper.status
         if local != localModel { localModel = local }
+        let parakeet = Parakeet.status
+        if parakeet != parakeetModel { parakeetModel = parakeet }
     }
 
     /// Asks for the microphone the first time; true when it may record.

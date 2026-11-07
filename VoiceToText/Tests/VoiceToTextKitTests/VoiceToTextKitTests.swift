@@ -230,6 +230,9 @@ struct Settings {
         #expect(DictationSettings.decode(try settings.encoded()) == settings)
         #expect(settings.languageCode == "es")
         #expect(DictationSettings().languageCode == nil)
+        // The fastest model, free and offline, unless the person picked another one.
+        #expect(DictationSettings().model == Parakeet.model)
+        #expect(DictationSettings.decode(Data(#"{"sounds":false}"#.utf8)).model == Parakeet.model)
     }
 
     @Test("Missing keys keep their defaults, and a broken file gives the defaults")
@@ -356,12 +359,13 @@ struct LocalModel {
         #expect(LocalWhisper.clean(raw) == expected)
     }
 
-    @Test("The local model goes to whisper-cli, every other model to OpenAI")
+    @Test("Local Whisper goes to whisper-cli, Parakeet to Parakeet, every other model to OpenAI")
     func routing() async throws {
-        let router = RoutingTranscriber(openAI: Echo(name: "openai"), local: Echo(name: "local"))
+        let router = RoutingTranscriber(openAI: Echo(name: "openai"), local: Echo(name: "local"), parakeet: Echo(name: "parakeet"))
         let file = URL(fileURLWithPath: "/a.m4a")
         #expect(try await router.transcribe(file, model: LocalWhisper.model, language: nil) == "local")
-        for model in DictationSettings.models where model != LocalWhisper.model {
+        #expect(try await router.transcribe(file, model: Parakeet.model, language: nil) == "parakeet")
+        for model in DictationSettings.models where ![LocalWhisper.model, Parakeet.model].contains(model) {
             #expect(try await router.transcribe(file, model: model, language: nil) == "openai")
         }
     }
@@ -370,6 +374,8 @@ struct LocalModel {
     func offered() {
         #expect(DictationSettings.models.contains(LocalWhisper.model))
         #expect(DictationSettings.modelName(LocalWhisper.model) == "Whisper large-v3-turbo (on this Mac)")
+        #expect(DictationSettings.models.contains(Parakeet.model))
+        #expect(DictationSettings.modelName(Parakeet.model) == "Parakeet Ultra (on this Mac, fastest)")
         #expect(DictationSettings.modelName("gpt-4o-transcribe") == "OpenAI gpt-4o-transcribe")
     }
 

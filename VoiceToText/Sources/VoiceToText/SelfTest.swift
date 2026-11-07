@@ -85,8 +85,8 @@ enum SelfTest {
         check("S-001 the HUD says Pasted", dictation.notice == .pasted && services.hud.isVisible)
         check("S-012 the menu bar flashes a checkmark after the paste", services.statusItem.symbolName == "checkmark")
         check("S-001 back to ready", dictation.state == .idle)
-        check("the transcriber got the recording, the model, and no language",
-              transcriber.calls.last?.file == store.recordingURL && transcriber.calls.last?.model == "gpt-4o-transcribe"
+        check("the transcriber got the recording, the default model (Parakeet), and no language",
+              transcriber.calls.last?.file == store.recordingURL && transcriber.calls.last?.model == Parakeet.model
                 && transcriber.calls.last?.language == nil)
         await wait(1.5)
         check("the HUD hides after the notice", !services.hud.isVisible)
@@ -205,7 +205,7 @@ enum SelfTest {
         func result(_ reply: JSONObject) -> JSONObject? { reply["result"] as? JSONObject }
         let status = result(await agent("status"))
         check("S-008 status reports the state and settings",
-              status?["state"] as? String == "idle" && status?["model"] as? String == "gpt-4o-transcribe" && status?["language"] as? String == "auto")
+              status?["state"] as? String == "idle" && status?["model"] as? String == Parakeet.model && status?["language"] as? String == "auto")
         transcriber.reply = .success("Said through the CLI.")
         let started = result(await agent("start"))
         check("S-008 start returns once recording", started?["state"] as? String == "recording" && dictation.state.name == "recording")
@@ -237,7 +237,7 @@ enum SelfTest {
               (badModel["error"] as? JSONObject)?["code"] as? String == "usage" && dictation.settings.sounds)
         let updated = result(await agent("settings update", ["language": "ES", "sounds": "false"]))
         check("S-008 settings update changes only what it is given",
-              updated?["language"] as? String == "es" && dictation.settings.sounds == false && dictation.settings.model == "gpt-4o-transcribe")
+              updated?["language"] as? String == "es" && dictation.settings.sounds == false && dictation.settings.model == Parakeet.model)
         _ = await agent("settings update", ["language": "auto", "sounds": "true"])
         check("S-008 language auto clears it", dictation.settings.languageCode == nil)
 
@@ -424,6 +424,22 @@ enum SelfTest {
         check("S-014 OpenAI models never stream", !recorder.streamed)
         await dictation.cancel()
         transcriber.pieceReply = .success("Piece.")
+
+        // S-016 Parakeet: the whole recording at key-up, no stream, with its model id and the language as a hint.
+        let beforeParakeet = dictation.settings
+        dictation.settings.model = Parakeet.model
+        dictation.settings.language = "es"
+        transcriber.reply = .success("Desde Parakeet.")
+        try? await dictation.start()
+        check("S-016 Parakeet does not stream (the whole dictation takes ~0.1 s)", !recorder.streamed)
+        check("S-016 Parakeet gets the whole recording with its model and language",
+              (try? await dictation.stop(paste: false)) == "Desde Parakeet."
+                && transcriber.calls.last?.model == Parakeet.model && transcriber.calls.last?.language == "es")
+        check("S-016 Settings and the CLI offer Parakeet by name",
+              DictationSettings.models.contains(Parakeet.model)
+                && DictationSettings.modelName(Parakeet.model).hasPrefix("Parakeet"))
+        transcriber.reply = .success("Hello from the fake transcriber.")
+        dictation.settings = beforeParakeet
 
         // S-015 One click between Spanish and English in the menu.
         let languages = NSMenu()

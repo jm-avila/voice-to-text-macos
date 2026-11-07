@@ -117,6 +117,8 @@ extension Services {
             "localModel": LocalWhisper.status.rawValue,
             // Loaded and waiting: no model load at key-up, and dictations stream.
             "localModelLoaded": server?.isReady ?? false,
+            "parakeetModel": Parakeet.status.rawValue,
+            "parakeetLoaded": parakeet?.isLoaded ?? false,
         ]
         if case .recording = dictation.state { status["recordingSeconds"] = (dictation.elapsed * 10).rounded() / 10 }
         if let error = dictation.lastError { status["lastError"] = error }

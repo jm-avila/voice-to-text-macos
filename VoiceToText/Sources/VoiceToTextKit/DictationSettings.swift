@@ -2,11 +2,11 @@ import Foundation
 
 /// What people can change, saved as settings.json next to history.md.
 public struct DictationSettings: Codable, Equatable, Sendable {
-    public static let models = ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1", LocalWhisper.model]
+    public static let models = ["gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1", LocalWhisper.model, Parakeet.model]
     /// ISO 639-1 codes offered in Settings. "" lets the model detect the language.
     public static let languages = ["", "en", "es", "ca", "fr", "de", "it", "pt"]
 
-    public var model = "gpt-4o-transcribe"
+    public var model = Parakeet.model
     public var language = ""
     /// Tink when the mic is live, Pop when recording stops.
     public var sounds = true
@@ -17,7 +17,7 @@ public struct DictationSettings: Codable, Equatable, Sendable {
     /// The menu bar icon shows only while dictating (or after a failure).
     public var hideWhenIdle = false
 
-    public init(model: String = "gpt-4o-transcribe", language: String = "", sounds: Bool = true,
+    public init(model: String = Parakeet.model, language: String = "", sounds: Bool = true,
                 shortcut: Shortcut = .standard, clickToDictate: Bool = false, hideWhenIdle: Bool = false) {
         self.model = model
         self.language = language
@@ -29,7 +29,11 @@ public struct DictationSettings: Codable, Equatable, Sendable {
 
     /// The name in the Settings picker.
     public static func modelName(_ model: String) -> String {
-        model == LocalWhisper.model ? "Whisper large-v3-turbo (on this Mac)" : "OpenAI \(model)"
+        switch model {
+        case LocalWhisper.model: "Whisper large-v3-turbo (on this Mac)"
+        case Parakeet.model: "Parakeet Ultra (on this Mac, fastest)"
+        default: "OpenAI \(model)"
+        }
     }
 
     /// nil when the model should detect the language.

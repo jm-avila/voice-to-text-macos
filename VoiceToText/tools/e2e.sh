@@ -77,6 +77,16 @@ say -o "$work/quiet.aiff" "[[slnc 2000]]"
 afconvert -f m4af -d aac "$work/quiet.aiff" "$work/quiet.m4a"
 lo=$("$cli" transcribe "$work/quiet.m4a" --json)
 [[ $(json "$lo" "d.get('text', 'MISSING')") == "" ]] && pass "S-010 local model hears nothing in silence (no \"Thank you.\")" || fail "S-010 silence ($lo)"
+
+# S-016 Parakeet: downloads 610 MB the first time it is picked, then no network.
+"$cli" settings update --model parakeet-ultra-local --language es --json >/dev/null
+for i in {1..600}; do [[ $(json "$("$cli" status --json)" "d['parakeetLoaded']") == True ]] && break; sleep 0.5; done
+pk=$("$cli" transcribe "$work/hola.m4a" --json)
+has "$(json "$pk" "d['text']")" "mercado" && pass "S-016 Parakeet, Spanish: \"$(json "$pk" "d['text']")\"" || fail "S-016 Parakeet Spanish ($pk)"
+pk=$("$cli" transcribe "$work/hello.m4a" --json)
+has "$(json "$pk" "d['text']")" "quarterly report" && pass "S-016 Parakeet, English with Español chosen stays English: \"$(json "$pk" "d['text']")\"" || fail "S-016 Parakeet English ($pk)"
+pk=$("$cli" transcribe "$work/quiet.m4a" --json)
+[[ $(json "$pk" "d.get('text', 'MISSING')") == "" ]] && pass "S-016 Parakeet hears nothing in silence" || fail "S-016 Parakeet silence ($pk)"
 "$cli" settings update --language es --model gpt-4o-mini-transcribe --json >/dev/null
 
 # MCP: one tool call over stdin and stdout.
