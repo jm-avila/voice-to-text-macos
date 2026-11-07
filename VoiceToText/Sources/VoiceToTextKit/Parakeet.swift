@@ -135,21 +135,38 @@ public final class ParakeetTranscriber: Transcribing, SampleTranscribing, Sendab
 
 /// The samples of one dictation, as the recorder hands them over (from its
 /// queue), for a model that takes them whole at key-up.
+/// Past `limit` (15 minutes: 58 MB) it lets go of them all and stays empty:
+/// a long recording goes through the file instead of holding hundreds of MB.
 public final class SampleBuffer: Sendable {
-    private let samples = Mutex<[Float]>([])
+    private struct State {
+        var samples: [Float] = []
+        var full = false
+    }
+    private let state = Mutex(State())
+    public let limit: Int
 
-    public init() {}
+    public init(limit: Int = 15 * 60 * WAV.rate) {
+        self.limit = limit
+    }
 
     /// Safe from the recorder's queue.
     public func append(_ more: [Float]) {
-        samples.withLock { $0 += more }
+        state.withLock { state in
+            guard !state.full else { return }
+            if state.samples.count + more.count > limit {
+                state.full = true
+                state.samples = []
+            } else {
+                state.samples += more
+            }
+        }
     }
 
-    /// Everything so far, emptied.
+    /// Everything so far, emptied. Empty once the limit was passed.
     public func take() -> [Float] {
-        samples.withLock { samples in
-            defer { samples = [] }
-            return samples
+        state.withLock { state in
+            defer { state.samples = [] }
+            return state.samples
         }
     }
 }

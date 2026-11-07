@@ -220,6 +220,8 @@ final class Dictation {
         // The cue plays on the press: capture ends right after it.
         if settings.sounds { sounds.play(.stop) }
         let keyUp = ContinuousClock.now
+        lastStreamed = false
+        lastInMemory = false
         update(.transcribing)
         // After the recorder stopped: every sample is in the stream and the file is finished.
         let recorded = await recorder.stop()
@@ -232,7 +234,8 @@ final class Dictation {
             update(.idle, notice: .nothingHeard)
             return ""
         }
-        // All of it, or the file: a gap (a mic that failed to restart) must not lose words.
+        // All of it, or the file. The recorder hands over every sample it writes, so
+        // this only fails past the buffer's limit (a very long dictation).
         let whole = samples.flatMap { Double($0.count) >= recorded * Double(WAV.rate) * 0.9 ? $0 : nil }
         return try await transcribeRecording(paste: paste, stream: stream, samples: whole, since: keyUp)
     }
@@ -329,7 +332,8 @@ final class Dictation {
             if let stream, let streamed = try? await stream.finish() {
                 text = streamed
                 lastStreamed = true
-            } else if let samples, let sampler, let heard = try? await sampler.transcribe(samples: samples, language: language) {
+            } else if settings.model == Parakeet.model, let samples, let sampler,
+                      let heard = try? await sampler.transcribe(samples: samples, language: language) {
                 text = heard
                 lastInMemory = true
             } else {

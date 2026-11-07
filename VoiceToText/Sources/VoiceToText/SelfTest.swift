@@ -449,10 +449,21 @@ enum SelfTest {
               (try? await dictation.stop(paste: false)) == "Desde Parakeet." && !dictation.lastInMemory
                 && transcriber.calls.last?.model == Parakeet.model && transcriber.calls.last?.language == "es")
         transcriber.sampleReply = .failure(TranscriptionError.local("Parakeet: gone"))
+        let memoryCalls = transcriber.sampleCalls.count
         try? await dictation.start()
         recorder.speak(tone(recorder.duration, 0.3))
         check("S-017 a failure from memory falls back to the file",
-              (try? await dictation.stop(paste: false)) == "Desde Parakeet." && transcriber.calls.count == filesBeforeMemory + 2)
+              (try? await dictation.stop(paste: false)) == "Desde Parakeet." && transcriber.sampleCalls.count == memoryCalls + 1
+                && transcriber.calls.count == filesBeforeMemory + 2 && !dictation.lastInMemory)
+        transcriber.sampleReply = .success("Desde la memoria.")
+        try? await dictation.start()
+        recorder.speak(tone(recorder.duration, 0.3))
+        dictation.settings.model = "gpt-4o-transcribe"
+        let switched = try? await dictation.stop(paste: false)
+        check("S-017 a model picked during the dictation gets it, not Parakeet from memory",
+              switched == "Desde Parakeet." && transcriber.calls.last?.model == "gpt-4o-transcribe"
+                && transcriber.sampleCalls.count == memoryCalls + 1)
+        dictation.settings.model = Parakeet.model
         check("S-016 Settings and the CLI offer Parakeet by name",
               DictationSettings.models.contains(Parakeet.model)
                 && DictationSettings.modelName(Parakeet.model).hasPrefix("Parakeet"))

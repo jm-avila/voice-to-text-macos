@@ -34,6 +34,15 @@ struct ParakeetTests {
         #expect(buffer.take().isEmpty)
     }
 
+    @Test("Past its limit the buffer lets go of everything, so a very long dictation goes through the file")
+    func limit() {
+        let buffer = SampleBuffer(limit: 4)
+        buffer.append([1, 2, 3])
+        buffer.append([4, 5])
+        buffer.append([6])
+        #expect(buffer.take().isEmpty)
+    }
+
     @Test("Samples from memory: under a quarter second is nothing heard, without loading the model")
     func tooShort() async throws {
         let parakeet = ParakeetTranscriber()
