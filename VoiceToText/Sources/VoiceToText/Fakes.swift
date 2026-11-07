@@ -1,4 +1,5 @@
 import AVFoundation
+import Synchronization
 import VoiceToTextKit
 
 /// A recorder with no microphone, for the self-test and snapshots. It
@@ -49,7 +50,7 @@ nonisolated final class FakeRecorder: AudioRecording, @unchecked Sendable {
 
 /// A transcriber with no network. Answers `reply` after `delay` and keeps every call.
 /// As the local model's server it answers `pieceReply` for each piece of a stream.
-nonisolated final class FakeTranscriber: Transcribing, ChunkTranscribing, @unchecked Sendable {
+nonisolated final class FakeTranscriber: Transcribing, ChunkTranscribing, SampleTranscribing, @unchecked Sendable {
     var reply: Result<String, Error> = .success("Hello from the fake transcriber.")
     var delay: Duration = .milliseconds(100)
     private(set) var calls: [(file: URL, model: String, language: String?)] = []
@@ -65,6 +66,15 @@ nonisolated final class FakeTranscriber: Transcribing, ChunkTranscribing, @unche
 
     func resetPieces() { pieces = [] }
 
+    var sampleReply: Result<String, Error> = .success("From memory.")
+    private(set) var sampleCalls: [(count: Int, language: String?)] = []
+
+    func transcribe(samples: [Float], language: String?) async throws -> String {
+        sampleCalls.append((samples.count, language))
+        try? await Task.sleep(for: .milliseconds(20))
+        return try sampleReply.get()
+    }
+
     func transcribe(_ file: URL, model: String, language: String?) async throws -> String {
         calls.append((file, model, language))
         try? await Task.sleep(for: delay)
@@ -79,6 +89,7 @@ nonisolated final class FileRecorder: AudioRecording, @unchecked Sendable {
     let source: URL
     private var player: Task<Void, Never>?
     private var started = ContinuousClock.now
+    private let played = Mutex(0)
 
     init(source: URL) { self.source = source }
 
@@ -87,11 +98,14 @@ nonisolated final class FileRecorder: AudioRecording, @unchecked Sendable {
         try FileManager.default.copyItem(at: source, to: url)
         let samples = try Self.read(source)
         started = .now
+        played.withLock { $0 = 0 }
         player = Task.detached {
             // 100 ms at a time, at the pace it was spoken.
             for start in stride(from: 0, to: samples.count, by: WAV.rate / 10) {
                 if Task.isCancelled { return }
-                onAudio?(Array(samples[start ..< min(start + WAV.rate / 10, samples.count)]))
+                let chunk = Array(samples[start ..< min(start + WAV.rate / 10, samples.count)])
+                onAudio?(chunk)
+                self.played.withLock { $0 += chunk.count }
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
@@ -99,7 +113,9 @@ nonisolated final class FileRecorder: AudioRecording, @unchecked Sendable {
 
     func stop() async -> TimeInterval {
         player?.cancel()
-        return Double(started.duration(to: .now).components.seconds) + 1
+        await player?.value
+        // What was played into onAudio, like the mic's samples written.
+        return Double(played.withLock { $0 }) / Double(WAV.rate)
     }
 
     func cancel() async { player?.cancel() }

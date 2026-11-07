@@ -28,12 +28,12 @@ final class Services {
     private(set) var settingsWindow: SettingsWindow!
 
     init(recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing?, server: WhisperServer? = nil,
-         parakeet: ParakeetTranscriber? = nil, pasteboard: NSPasteboard) {
+         parakeet: ParakeetTranscriber? = nil, sampler: SampleTranscribing? = nil, pasteboard: NSPasteboard) {
         store = Store()
         self.server = server
         self.parakeet = parakeet
         dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, streamer: streamer,
-                              paster: Paster(pasteboard: pasteboard))
+                              sampler: sampler ?? parakeet, paster: Paster(pasteboard: pasteboard))
         hud = RecordingHUD(dictation: dictation)
         shortcutRecorder = ShortcutRecorder(hotkeys: hotkeys, dictation: dictation)
         settingsWindow = SettingsWindow { [unowned self] in self }
@@ -67,7 +67,7 @@ final class Services {
     static func testing() -> Services {
         let transcriber = FakeTranscriber()
         let services = Services(recorder: FakeRecorder(), transcriber: transcriber, streamer: transcriber,
-                                pasteboard: NSPasteboard(name: NSPasteboard.Name("com.jmavila.voicetotext.selftest")))
+                                sampler: transcriber, pasteboard: NSPasteboard(name: NSPasteboard.Name("com.jmavila.voicetotext.selftest")))
         services.dictation.paster.postsPaste = false
         services.dictation.sounds.audible = false
         return services

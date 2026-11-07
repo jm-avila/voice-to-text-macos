@@ -26,8 +26,8 @@ this repo ([below](#legacy-hammerspoon--bash-version)).
 - **Two kinds of model:**
   - OpenAI: `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`.
   - Local, no key, no network, no cost:
-    - **Parakeet Ultra** through FluidAudio, on the Neural Engine. The default and the fastest: text 0.08 s after you
-      let go of a short dictation, 0.25 s after 23 s.
+    - **Parakeet Ultra** through FluidAudio, on the Neural Engine. The default and the fastest: text 0.07 s after you
+      let go of a short dictation, 0.18 s after 23 s.
     - **Whisper large-v3-turbo** through whisper.cpp.
 - **Any language** the model supports. Detects the language by default, or set one (English, Spanish, Catalan, French, German, Italian, Portuguese).
 - **A small pill at the bottom of the screen** while dictating, with a level meter and a timer, then "Pasted", "Copied" or the error. It never takes focus, so the text lands in the app you were typing in.
@@ -120,7 +120,7 @@ without its optional parts (speech synthesis, diarization). The first build fetc
 | OpenAI gpt-4o-mini-transcribe | `gpt-4o-mini-transcribe` | OpenAI | Cheaper | Slightly less accurate |
 | OpenAI whisper-1 | `whisper-1` | OpenAI | Per minute | The original hosted Whisper |
 | Whisper large-v3-turbo (on this Mac) | `whisper-large-v3-turbo-local` | Your Mac (whisper.cpp, Metal) | Free | Offline. The model stays loaded and long dictations are transcribed while you talk: about 0.5 s after you let go on an M4 Pro, for 4 s or 23 s. |
-| Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | **Default.** Offline after a 610 MB download the first time it is used. 0.08 s after you let go for a short dictation, 0.25 s for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
+| Parakeet Ultra (on this Mac, fastest) | `parakeet-ultra-local` | Your Mac (FluidAudio, Neural Engine) | Free | **Default.** Offline after a 610 MB download the first time it is used. 0.07 s after you let go for a short dictation, 0.18 s for 23 s. Detects the language itself (25 European languages): English said with Español chosen stays English. |
 
 ### Speed by model
 
@@ -128,7 +128,7 @@ M4 Pro, Spanish, Español chosen, 2026-11-07. Median of 3 (files) or 5 (dictatio
 
 | Model | Dictation, key-up to text: short | Dictation: 23 s | File (`vtt transcribe`): 2 s | File: 23 s |
 |---|---|---|---|---|
-| Parakeet Ultra (default) | **0.08 s** | **0.25 s** | **0.07 s** | **0.21 s** |
+| Parakeet Ultra (default) | **0.07 s** | **0.18 s** | **0.07 s** | **0.21 s** |
 | Whisper large-v3-turbo (local) | 0.53 s | 0.55 s (streamed while you talk) | 0.51 s | 0.80 s |
 | OpenAI gpt-4o-transcribe | ≈ file time | ≈ file time | 0.64 s | 1.58 s |
 | OpenAI gpt-4o-mini-transcribe | ≈ file time | ≈ file time | 0.67 s | 1.10 s |
@@ -151,15 +151,16 @@ From letting go of the shortcut to the text, on an M4 Pro (`say` clips, median o
 
 | Dictation | Whisper, before (whisper-cli per dictation) | Whisper, now | Parakeet Ultra (default) |
 |---|---|---|---|
-| Spanish, 2–4 s | 1.41 s | 0.53 s | **0.08 s** |
-| English, 2–3 s | 1.45 s | 0.50 s | **0.08 s** (with Español chosen, not translated) |
-| Spanish, 7 s | | | **0.12 s** |
-| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | **0.25 s** |
+| Spanish, 2–4 s | 1.41 s | 0.53 s | **0.075 s** |
+| English, 2–3 s | 1.45 s | 0.50 s | **0.07 s** (with Español chosen, not translated) |
+| Spanish, 7 s | | | **0.115 s** |
+| Spanish, 23 s with 3 pauses | 1.76 s | 0.55 s (0.80 s sent whole) | **0.17–0.19 s** |
 
 The Parakeet column is a dictation through the app (`vtt start` / `vtt stop`, the "microphone" playing the clip in real
-time), median of 5, without the paste (a few ms). With Parakeet the app is 6× faster than Whisper for a short
-dictation and 2× for a long one. Against the app before this work (whisper-cli, language detected) it is 17× faster
-for a short dictation and 7× for a long one.
+time), median of 5, without the paste (a few ms). Parakeet gets the recorder's samples from memory at key-up, so
+nothing waits for the m4a to be finished, read back and resampled (that took 0.25 s for 23 s before). The file is still
+saved, for Retry. With Parakeet the app is 7× faster than Whisper for a short dictation and 3× for a long one. Against
+the app before this work (whisper-cli, language detected) it is 19× faster for a short dictation and 10× for a long one.
 
 For comparison, [Phonon](https://github.com/infatoshi/phonon), the app this work started from, says about 65 ms from
 key-up to pasted text on an M4 Max, at any length, and that includes rewriting the text with a 1.7B model. It
@@ -172,7 +173,7 @@ recording at key-up, which is why a long dictation takes longer.
   audio: 35 ms for 2 s, 113 ms for 23 s (the model alone).
 - It writes the whole text in one pass (TDT) instead of word by word, on the Neural Engine.
 - It loads in 0.1 s and detects the language at no extra cost, so nothing has to be fixed or streamed: the whole
-  recording goes at key-up. The rest of the 0.25 s is closing the recording and reading it.
+  recording goes at key-up, from memory (the samples the recorder already made), not from the file.
 
 #### Why Whisper got faster
 

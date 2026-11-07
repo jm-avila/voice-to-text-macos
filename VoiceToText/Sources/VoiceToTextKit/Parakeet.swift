@@ -32,7 +32,12 @@ public enum Parakeet {
 /// Keeps the model loaded while it is selected (`load`), frees it when another
 /// model is picked (`unload`). A transcription with nothing loaded loads it
 /// first: about 0.1 s once downloaded, the download itself the first time.
-public final class ParakeetTranscriber: Transcribing, Sendable {
+/// A model that takes a dictation's samples straight from the recorder.
+public protocol SampleTranscribing: Sendable {
+    func transcribe(samples: [Float], language: String?) async throws -> String
+}
+
+public final class ParakeetTranscriber: Transcribing, SampleTranscribing, Sendable {
     private struct State {
         var manager: AsrManager?
         /// Runs to the end once started (a download can't be stopped halfway), so a
@@ -100,9 +105,22 @@ public final class ParakeetTranscriber: Transcribing, Sendable {
         } catch {
             throw TranscriptionError.local("Parakeet could not read the recording: \(error.localizedDescription)")
         }
-        // Under a quarter second there is nothing to hear. The model refuses less than
-        // its minimum (0.3 s), so a short word is padded with silence.
-        guard samples.count >= 4_000 else { return "" }
+        return try await transcribe(samples, with: manager, language: language)
+    }
+
+    /// The recorder's own 16 kHz mono samples, kept in memory while the person
+    /// talks: no file to finish, read back, and resample at key-up.
+    public func transcribe(samples: [Float], language: String?) async throws -> String {
+        guard samples.count >= Self.audible else { return "" }
+        return try await transcribe(samples, with: try await load(keep: false), language: language)
+    }
+
+    /// Under a quarter second there is nothing to hear.
+    static let audible = 4_000
+
+    private func transcribe(_ samples: [Float], with manager: AsrManager, language: String?) async throws -> String {
+        // The model refuses less than its minimum (0.3 s), so a short word is padded with silence.
+        guard samples.count >= Self.audible else { return "" }
         let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: 16_000)
         let padded = samples + [Float](repeating: 0, count: max(0, minimum - samples.count))
         var decoder = TdtDecoderState.make()
@@ -111,6 +129,44 @@ public final class ParakeetTranscriber: Transcribing, Sendable {
             return Transcript.clean(result.text)
         } catch {
             throw TranscriptionError.local("Parakeet: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// The samples of one dictation, as the recorder hands them over (from its
+/// queue), for a model that takes them whole at key-up.
+/// Past `limit` (15 minutes: 58 MB) it lets go of them all and stays empty:
+/// a long recording goes through the file instead of holding hundreds of MB.
+public final class SampleBuffer: Sendable {
+    private struct State {
+        var samples: [Float] = []
+        var full = false
+    }
+    private let state = Mutex(State())
+    public let limit: Int
+
+    public init(limit: Int = 15 * 60 * WAV.rate) {
+        self.limit = limit
+    }
+
+    /// Safe from the recorder's queue.
+    public func append(_ more: [Float]) {
+        state.withLock { state in
+            guard !state.full else { return }
+            if state.samples.count + more.count > limit {
+                state.full = true
+                state.samples = []
+            } else {
+                state.samples += more
+            }
+        }
+    }
+
+    /// Everything so far, emptied. Empty once the limit was passed.
+    public func take() -> [Float] {
+        state.withLock { state in
+            defer { state.samples = [] }
+            return state.samples
         }
     }
 }

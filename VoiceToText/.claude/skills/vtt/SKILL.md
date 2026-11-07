@@ -26,7 +26,7 @@ If the app is closed, the command opens it in the background.
 | `vtt status --json` | state (idle, starting, recording, transcribing), model, language, key/mic/Accessibility, history count, last error |
 | `vtt transcribe <file> --json` | `{"text": ...}` for an m4a, mp3, wav, … with the current model and language. Not saved |
 | `vtt start --json` | Opens the mic and returns once it is live: speech before that is lost |
-| `vtt stop --json` | Stops, transcribes, saves to history: `{"text", "saved", "streamed", "latencyMs"}` (key-up to text; `streamed`: the local model transcribed it while it was spoken). `--paste` also pastes into the front app |
+| `vtt stop --json` | Stops, transcribes, saves to history: `{"text", "saved", "streamed", "inMemory", "latencyMs"}` (key-up to text; `streamed`: local Whisper transcribed it while it was spoken; `inMemory`: Parakeet took the samples from memory, not the file). `--paste` also pastes into the front app |
 | `vtt cancel --json` | Stops recording and throws the audio away |
 | `vtt history list --limit N --json` | Past transcripts, newest first: `{"entries": [{date, text}], "total", "file"}` |
 | `vtt settings update [--model M] [--language es\|auto] [--sounds true\|false] --json` | Only the options given change |

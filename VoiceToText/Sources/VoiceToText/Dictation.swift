@@ -120,6 +120,8 @@ final class Dictation {
     private(set) var lastLatency: Duration?
     /// The last dictation was transcribed while it was spoken (no whole file at key-up).
     private(set) var lastStreamed = false
+    /// The last dictation went to Parakeet from memory, not through the file.
+    private(set) var lastInMemory = false
     var settings: DictationSettings {
         didSet {
             guard settings != oldValue else { return }
@@ -134,6 +136,8 @@ final class Dictation {
     @ObservationIgnored let transcriber: Transcribing
     /// The local model's server: pieces go to it while the person talks. nil: whole files only.
     @ObservationIgnored let streamer: ChunkTranscribing?
+    /// Parakeet: the samples go to it from memory at key-up. nil: the file.
+    @ObservationIgnored let sampler: SampleTranscribing?
     @ObservationIgnored let paster: Paster
     @ObservationIgnored let sounds = Sounds()
     /// Runs after every change of state or notice: the status item and HUD redraw.
@@ -149,12 +153,16 @@ final class Dictation {
     @ObservationIgnored private var canceling: Task<Void, Never>?
     /// The dictation being transcribed while it is spoken (local model, server ready).
     @ObservationIgnored private var stream: StreamingTranscription?
+    /// The dictation's samples, kept for Parakeet.
+    @ObservationIgnored private var buffer: SampleBuffer?
 
-    init(store: Store, recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing? = nil, paster: Paster) {
+    init(store: Store, recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing? = nil,
+         sampler: SampleTranscribing? = nil, paster: Paster) {
         self.store = store
         self.recorder = recorder
         self.transcriber = transcriber
         self.streamer = streamer
+        self.sampler = sampler
         self.paster = paster
         settings = store.loadSettings()
         history = store.loadHistory()
@@ -184,10 +192,12 @@ final class Dictation {
         await canceling?.value
         let stream = makeStream()
         self.stream = stream
+        let buffer = stream == nil && settings.model == Parakeet.model && sampler != nil ? SampleBuffer() : nil
+        self.buffer = buffer
         do {
-            // A method of the stream, not a closure written here: this file runs on
-            // the main actor, and the samples arrive on the recorder's queue.
-            try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout, onAudio: stream?.append)
+            // A method of the stream or buffer, not a closure written here: this file runs
+            // on the main actor, and the samples arrive on the recorder's queue.
+            try await recorder.start(to: store.recordingURL, timeout: Self.micTimeout, onAudio: stream?.append ?? buffer?.append)
         } catch {
             dropStream()
             fail(error)
@@ -210,17 +220,24 @@ final class Dictation {
         // The cue plays on the press: capture ends right after it.
         if settings.sounds { sounds.play(.stop) }
         let keyUp = ContinuousClock.now
+        lastStreamed = false
+        lastInMemory = false
         update(.transcribing)
         // After the recorder stopped: every sample is in the stream and the file is finished.
         let recorded = await recorder.stop()
         let stream = self.stream
         self.stream = nil
+        let samples = buffer?.take()
+        buffer = nil
         guard recorded >= Self.shortest else {
             stream?.cancel()
             update(.idle, notice: .nothingHeard)
             return ""
         }
-        return try await transcribeRecording(paste: paste, stream: stream, since: keyUp)
+        // All of it, or the file. The recorder hands over every sample it writes, so
+        // this only fails past the buffer's limit (a very long dictation).
+        let whole = samples.flatMap { Double($0.count) >= recorded * Double(WAV.rate) * 0.9 ? $0 : nil }
+        return try await transcribeRecording(paste: paste, stream: stream, samples: whole, since: keyUp)
     }
 
     /// Sends the kept recording again, after a failure (network, key).
@@ -300,16 +317,25 @@ final class Dictation {
     private func dropStream() {
         stream?.cancel()
         stream = nil
+        buffer = nil
     }
 
-    /// The streamed text, or the whole file when there was no stream or a piece failed.
-    private func transcribeRecording(paste: Bool, stream: StreamingTranscription? = nil, since start: ContinuousClock.Instant) async throws -> String {
+    /// The streamed text, Parakeet's from the samples in memory, or the whole
+    /// file when there was neither or they failed.
+    private func transcribeRecording(paste: Bool, stream: StreamingTranscription? = nil, samples: [Float]? = nil,
+                                     since start: ContinuousClock.Instant) async throws -> String {
         let text: String
         do {
             lastStreamed = false
+            lastInMemory = false
+            let language = settings.languageCode
             if let stream, let streamed = try? await stream.finish() {
                 text = streamed
                 lastStreamed = true
+            } else if settings.model == Parakeet.model, let samples, let sampler,
+                      let heard = try? await sampler.transcribe(samples: samples, language: language) {
+                text = heard
+                lastInMemory = true
             } else {
                 text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
             }

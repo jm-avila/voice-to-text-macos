@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 import Testing
 @testable import VoiceToTextKit
@@ -24,6 +25,31 @@ struct ParakeetTests {
         #expect(!parakeet.isLoaded && !parakeet.isLoading)
     }
 
+    @Test("The buffer keeps samples in order from any thread and empties when taken")
+    func buffer() async {
+        let buffer = SampleBuffer()
+        buffer.append([1, 2])
+        await Task.detached { buffer.append([3]) }.value
+        #expect(buffer.take() == [1, 2, 3])
+        #expect(buffer.take().isEmpty)
+    }
+
+    @Test("Past its limit the buffer lets go of everything, so a very long dictation goes through the file")
+    func limit() {
+        let buffer = SampleBuffer(limit: 4)
+        buffer.append([1, 2, 3])
+        buffer.append([4, 5])
+        buffer.append([6])
+        #expect(buffer.take().isEmpty)
+    }
+
+    @Test("Samples from memory: under a quarter second is nothing heard, without loading the model")
+    func tooShort() async throws {
+        let parakeet = ParakeetTranscriber()
+        #expect(try await parakeet.transcribe(samples: [Float](repeating: 0.1, count: 3_000), language: "es") == "")
+        #expect(!parakeet.isLoaded && !parakeet.isLoading)
+    }
+
     /// The real model, when it is downloaded (pick Parakeet once in Settings). `say` makes the speech.
     @Test("Spanish and English come back in their own language, a short word too, and unload frees it",
           .enabled(if: Parakeet.status == .ready))
@@ -42,6 +68,11 @@ struct ParakeetTests {
             let heard = try await parakeet.transcribe(file, model: Parakeet.model, language: language)
             #expect(heard == expected)
         }
+        // From memory, the recorder's samples: the same text as from the file.
+        let memory = try Self.say("Paulina", "Hola, esto es una prueba de dictado.")
+        defer { try? FileManager.default.removeItem(at: memory) }
+        let samples = try AudioConverter().resampleAudioFile(path: memory.path)
+        #expect(try await parakeet.transcribe(samples: samples, language: "es") == "Hola, esto es una prueba de dictado.")
         #expect(parakeet.isLoaded)
         // Another model picked while a dictation is being transcribed: that dictation still comes back.
         let file = try Self.say("Paulina", "Mañana compramos pan y leche en el mercado.")

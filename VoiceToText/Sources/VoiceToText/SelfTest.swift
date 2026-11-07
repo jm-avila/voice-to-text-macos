@@ -425,16 +425,45 @@ enum SelfTest {
         await dictation.cancel()
         transcriber.pieceReply = .success("Piece.")
 
-        // S-016 Parakeet: the whole recording at key-up, no stream, with its model id and the language as a hint.
+        // S-016 Parakeet: the whole dictation at key-up (no pieces), with its model id and the language as a hint.
         let beforeParakeet = dictation.settings
         dictation.settings.model = Parakeet.model
         dictation.settings.language = "es"
         transcriber.reply = .success("Desde Parakeet.")
+        // S-017 From memory: the recorder's samples go to Parakeet at key-up, not the file.
+        transcriber.sampleReply = .success("Desde la memoria.")
+        let filesBeforeMemory = transcriber.calls.count
+        transcriber.resetPieces()
         try? await dictation.start()
-        check("S-016 Parakeet does not stream (the whole dictation takes ~0.1 s)", !recorder.streamed)
-        check("S-016 Parakeet gets the whole recording with its model and language",
-              (try? await dictation.stop(paste: false)) == "Desde Parakeet."
+        check("S-017 Parakeet asks the mic for its audio as it arrives, and nothing streams to Whisper",
+              recorder.streamed && transcriber.pieces.isEmpty)
+        recorder.speak(tone(recorder.duration, 0.3))
+        let memory = result(await agent("stop"))
+        check("S-017 at key-up all the samples go to Parakeet in the chosen language, and the file is not read",
+              memory?["text"] as? String == "Desde la memoria." && memory?["inMemory"] as? Bool == true
+                && transcriber.sampleCalls.last?.count == Int(recorder.duration * Double(WAV.rate))
+                && transcriber.sampleCalls.last?.language == "es" && transcriber.calls.count == filesBeforeMemory)
+        try? await dictation.start()
+        recorder.speak(tone(recorder.duration / 3, 0.3))
+        check("S-017 with samples missing (a mic that dropped out) the whole file goes instead",
+              (try? await dictation.stop(paste: false)) == "Desde Parakeet." && !dictation.lastInMemory
                 && transcriber.calls.last?.model == Parakeet.model && transcriber.calls.last?.language == "es")
+        transcriber.sampleReply = .failure(TranscriptionError.local("Parakeet: gone"))
+        let memoryCalls = transcriber.sampleCalls.count
+        try? await dictation.start()
+        recorder.speak(tone(recorder.duration, 0.3))
+        check("S-017 a failure from memory falls back to the file",
+              (try? await dictation.stop(paste: false)) == "Desde Parakeet." && transcriber.sampleCalls.count == memoryCalls + 1
+                && transcriber.calls.count == filesBeforeMemory + 2 && !dictation.lastInMemory)
+        transcriber.sampleReply = .success("Desde la memoria.")
+        try? await dictation.start()
+        recorder.speak(tone(recorder.duration, 0.3))
+        dictation.settings.model = "gpt-4o-transcribe"
+        let switched = try? await dictation.stop(paste: false)
+        check("S-017 a model picked during the dictation gets it, not Parakeet from memory",
+              switched == "Desde Parakeet." && transcriber.calls.last?.model == "gpt-4o-transcribe"
+                && transcriber.sampleCalls.count == memoryCalls + 1)
+        dictation.settings.model = Parakeet.model
         check("S-016 Settings and the CLI offer Parakeet by name",
               DictationSettings.models.contains(Parakeet.model)
                 && DictationSettings.modelName(Parakeet.model).hasPrefix("Parakeet"))
