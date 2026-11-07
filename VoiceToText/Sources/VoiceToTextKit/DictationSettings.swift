@@ -10,11 +10,15 @@ public struct DictationSettings: Codable, Equatable, Sendable {
     public var language = ""
     /// Tink when the mic is live, Pop when recording stops.
     public var sounds = true
+    /// Starts and stops dictation from any app.
+    public var shortcut = Shortcut.standard
 
-    public init(model: String = "gpt-4o-transcribe", language: String = "", sounds: Bool = true) {
+    public init(model: String = "gpt-4o-transcribe", language: String = "", sounds: Bool = true,
+                shortcut: Shortcut = .standard) {
         self.model = model
         self.language = language
         self.sounds = sounds
+        self.shortcut = shortcut
     }
 
     /// The name in the Settings picker.
@@ -31,6 +35,10 @@ public struct DictationSettings: Codable, Equatable, Sendable {
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? model
         language = try container.decodeIfPresent(String.self, forKey: .language) ?? language
         sounds = try container.decodeIfPresent(Bool.self, forKey: .sounds) ?? sounds
+        // A bad shortcut (edited by hand) falls back to ⌃. instead of losing the other settings.
+        if let saved = try? container.decodeIfPresent(Shortcut.self, forKey: .shortcut), saved.problem == nil {
+            shortcut = saved
+        }
     }
 
     public static func decode(_ data: Data?) -> DictationSettings {

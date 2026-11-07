@@ -30,7 +30,7 @@ final class SettingsWindow {
     private func make() -> NSWindow {
         let services = services()
         let root = SettingsView(dictation: services.dictation, permissions: services.permissions,
-                                hotkeys: services.hotkeys, login: services.loginItem)
+                                hotkeys: services.hotkeys, recorder: services.shortcutRecorder, login: services.loginItem)
             .themed()
             .noInitialFocus()
         let controller = NSHostingController(rootView: root)
@@ -39,6 +39,15 @@ final class SettingsWindow {
         window.title = "VoiceToText Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
+        // Closing the window, or clicking another app, while it records a shortcut gives
+        // the old one back: the local monitor only sees keys while Settings is key.
+        // (SwiftUI's onDisappear does not run: the window only orders out.)
+        let recorder = services.shortcutRecorder
+        for name in [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { _ in
+                MainActor.assumeIsolated { recorder.cancel() }
+            }
+        }
         self.window = window
         return window
     }
@@ -67,6 +76,7 @@ struct SettingsView: View {
     @Bindable var dictation: Dictation
     let permissions: Permissions
     let hotkeys: HotkeyCenter
+    let recorder: ShortcutRecorder
     let login: LoginItem
     /// Looked up when the window opens: it asks Keychain through /usr/bin/security.
     @ViewState private var keyFound: Bool?
@@ -75,13 +85,32 @@ struct SettingsView: View {
         Form {
             Section("Dictation") {
                 LabeledContent("Shortcut") {
-                    KeyCap(text: hotkeys.combo.symbols)
+                    HStack(spacing: Space.sm) {
+                        if recorder.isRecording {
+                            Text("Type a shortcut…")
+                                .foregroundStyle(.secondary)
+                            Button("Cancel") { recorder.cancel() }
+                        } else {
+                            KeyCap(text: hotkeys.combo.symbols)
+                            Button("Change…") { recorder.start() }
+                            if hotkeys.combo != .standard {
+                                Button("Reset") { recorder.reset() }
+                                    .help("Back to \(Shortcut.standard.symbols)")
+                            }
+                        }
+                    }
+                }
+                if let problem = recorder.problem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
                 }
                 if hotkeys.isTaken {
                     LabeledContent {
                         Button("Try Again") { hotkeys.retry() }
                     } label: {
-                        Label("Another app uses \(hotkeys.combo.symbols), maybe the Hammerspoon version. Turn it off there.",
+                        Label(hotkeys.combo == .standard
+                              ? "Another app uses \(hotkeys.combo.symbols), maybe the Hammerspoon version. Turn it off there."
+                              : "Another app uses \(hotkeys.combo.symbols). Turn it off there, or change the shortcut.",
                               systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                     }

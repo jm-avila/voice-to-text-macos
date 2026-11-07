@@ -80,3 +80,13 @@ Acceptance:
 - [e2e] English and Spanish (detected) come back right; 2 s of silence comes back empty, not "Thank you.".
 - [e2e] `vtt status` reports `localModel: ready` after `tools/get-model.sh`.
 Status: done
+
+### S-011 Change the shortcut
+As the user, I pick my own dictation shortcut in Settings; ⌃. stays the default.
+Screens: settings
+Acceptance:
+- [unit] The default is ⌃.; it is saved in settings.json; a key without ⌃ or ⌥ is refused (⌘W, ⌘Q stay with apps); a bad saved one falls back to ⌃.
+- [self] Change… records the next press; ⇧ alone is refused and recording goes on; Escape cancels; Reset goes back to ⌃.; closing Settings stops recording; status shows the new one.
+- [snap] Settings shows the changed shortcut with Reset, and the recording state with a refused press.
+- [manual] The new shortcut starts and stops dictation in another app; one another app owns is refused and the old one stays.
+Status: done

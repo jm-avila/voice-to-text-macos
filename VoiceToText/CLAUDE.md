@@ -16,7 +16,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - `Package.swift` a Swift package. There is no Xcode project.
 - `build.sh` builds, signs (ad hoc), installs `~/Applications/VoiceToText.app`, and links `~/.local/bin/vtt`.
 - `tools/draw_icon.swift` the icon, drawn in code. `build.sh` turns it into `Resources/AppIcon.icns`.
-- `docs/` the brief and the user stories (S-001…S-010).
+- `docs/` the brief and the user stories (S-001…S-011).
 
 ## Files
 
@@ -24,7 +24,8 @@ version one folder up (`../SPEC.md`) and shares its files.
 - `history.md` keeps the bash tool's format (`## yyyy-MM-dd HH:mm:ss`, blank line, text). Both tools read and append it.
 - The OpenAI key: env `OPENAI_API_KEY`, else Keychain through `/usr/bin/security` (account `agent-secrets`, service `OPENAI_API_KEY`).
 - The local model: `models/ggml-large-v3-turbo.bin` and `models/ggml-silero-v5.1.2.bin` in the real store, even with `APP_STORE` (one 1.6 GB copy). `tools/get-model.sh` gets them and whisper.cpp.
-- `APP_STORE=<folder>` moves the store. A copy started with it never takes the ⌃. shortcut.
+- `APP_STORE=<folder>` moves the store. A copy started with it never takes the global shortcut.
+- The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it.
 
 ## Build and check
 
