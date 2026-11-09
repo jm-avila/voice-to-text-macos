@@ -37,7 +37,7 @@ This Mac has Command Line Tools only (no Xcode). See the `mac-app` skill for the
 - Unit tests: `tools/test.sh .`
 - Self-test with fakes (no mic, no API, no paste): `tools/selftest.sh`. Exit 0 when every check passes. Add a check per story to `SelfTest.swift`.
 - End to end against the real API (a few `say` clips): `tools/e2e.sh`. `--mic` also records 3 s from the real mic.
-- Speed of the local models: `tools/latency.sh` (whisper-cli vs server vs Parakeet). `--file-mic` streams a 23 s clip through the real pipeline (`APP_FAKE_MIC`, test copies only); `--mic` uses the speaker and mic (poor audio: the stream rarely cuts).
+- Speed of the local models: `tools/latency.sh` (whisper-cli vs server vs Parakeet). `--file-mic` streams a 23 s clip through the real pipeline (`APP_FAKE_MIC`, test copies only); `--mic` uses the speaker and mic for Parakeet and Whisper: time to open the mic, key-up to text, `inMemory` (poor audio: the stream rarely cuts).
 - Agent CLI rules: `APP_STORE=/tmp/VoiceToText-cli.store ~/Repositories/references/bama/skills/code/agent-cli/scripts/check-agent-cli.sh vtt`
 - Snapshots: `tools/snap.sh` writes `/tmp/VoiceToText-shots/hud-<state>-light|dark.png`, `menubar-<state>-…png` (drawn from the view: the menu bar window can't be screencaptured) and `settings-light|dark.png`. Open and judge every one after a UI change.
 - Grid: `tools/grid-lint.sh && swift tools/check-layout.swift /tmp/VoiceToText-shots/*-layout.json`

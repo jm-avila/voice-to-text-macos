@@ -6,7 +6,8 @@
 #          Parakeet in the app (kept loaded; downloads 610 MB the first time)
 #   --mic  also dictates through the real microphone: `vtt start`, `say` plays
 #          a clip through the speakers, `vtt stop` reports key-up to text
-#          (latencyMs). Turn the volume up; macOS asks for mic access once.
+#          (latencyMs), for Parakeet and Whisper, and how long `vtt start` took to
+#          open the mic. Turn the volume up; macOS asks for mic access once.
 #          The laptop's speaker into its own mic is poor audio: pauses barely
 #          stand out, so the stream rarely cuts. --file-mic measures streaming.
 #   --file-mic  a second test copy whose "microphone" plays a 23 s clip with
@@ -16,7 +17,7 @@
 # Usage: tools/latency.sh [--mic] [--file-mic] [--runs N]
 #        tools/latency.sh --help
 set -uo pipefail
-if [[ ${1:-} == -h || ${1:-} == --help ]]; then sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0; fi
 mic=false; filemic=false; runs=3
 while (( $# )); do
   case $1 in
@@ -85,16 +86,24 @@ done
 echo "(server and parakeet include the vtt round trip and reading the m4a; parakeet ran with Español chosen)"
 
 if $mic; then
+  # Mic open: `vtt start` returns once the mic is live (what you wait for after ⌃.; ⌥⌘ opens it while you hold).
   echo
-  printf '%-10s %10s  %s\n' clip key-up_ms text
-  for clip in es-short es-long en-short; do
-    "$cli" settings update --language ${clip%%-*} --json >/dev/null
-    started=$("$cli" start --json)
-    [[ $(json "$started" "d['state']") == recording ]] || { echo "FAIL mic did not start ($started)"; exit 1; }
-    say -v $voice[$clip] "$text[$clip]"
-    sleep 0.3
-    stopped=$("$cli" stop --json)
-    printf '%-10s %10s  %s\n' $clip "$(json "$stopped" "d.get('latencyMs')")" "$(json "$stopped" "d['text']")"
+  printf '%-10s %-10s %8s %10s %9s  %s\n' model clip open_ms key-up_ms inMemory text
+  for model in parakeet-ultra-local whisper-large-v3-turbo-local; do
+    "$cli" settings update --model $model --json >/dev/null
+    for i in {1..60}; do
+      [[ $(json "$("$cli" status --json)" "d['parakeetLoaded'] or d['localModelLoaded']") == True ]] && break; sleep 0.5
+    done
+    for clip in es-short es-long en-short; do
+      "$cli" settings update --language ${clip%%-*} --json >/dev/null
+      open_ms=$(ms "$cli" start --json)
+      [[ $(json "$("$cli" status --json)" "d['state']") == recording ]] || { echo "FAIL mic did not start"; exit 1; }
+      say -v $voice[$clip] "$text[$clip]"
+      sleep 0.3
+      stopped=$("$cli" stop --json)
+      printf '%-10s %-10s %8s %10s %9s  %s\n' ${model%%-*} $clip $open_ms "$(json "$stopped" "d.get('latencyMs')")" \
+        "$(json "$stopped" "d.get('inMemory')")" "$(json "$stopped" "d['text'][:50]")"
+    done
   done
 fi
 
