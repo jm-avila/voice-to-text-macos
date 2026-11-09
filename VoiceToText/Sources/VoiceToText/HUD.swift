@@ -57,6 +57,8 @@ final class RecordingHUD {
 
 struct HUDView: View {
     let dictation: Dictation
+    /// How long the HUD says "Speak now" once the mic is live.
+    static let speakNow: TimeInterval = 1.5
 
     var body: some View {
         content
@@ -93,8 +95,13 @@ struct HUDView: View {
                         LevelMeter(level: dictation.recorder.level())
                         Text(Elapsed.text(context.date.timeIntervalSince(since)))
                             .monospacedDigit()
-                        Text("\(HotkeyCenter.shared.combo.symbols) to stop")
-                            .foregroundStyle(.secondary)
+                        // The moment to talk: the mic is live (the Tink plays now too).
+                        if context.date.timeIntervalSince(since) < Self.speakNow {
+                            Text("Speak now").foregroundStyle(Palette.recording)
+                        } else {
+                            Text("\(HotkeyCenter.shared.combo.symbols) to stop")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             case .transcribing:

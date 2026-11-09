@@ -167,6 +167,20 @@ key-up to pasted text on an M4 Max, at any length, and that includes rewriting t
 transcribes every 0.4 s while you talk, so at key-up only the last seconds are left. VoiceToText sends the whole
 recording at key-up, which is why a long dictation takes longer.
 
+#### Through the real microphone
+
+The same clips played by the speakers into the MacBook's own mic, in a test copy (`tools/latency.sh --mic`, 3 runs,
+2026-11-09). Opening the mic is the wait before you can talk; key-up to text is the wait after.
+
+| | Open the mic | Spanish, 2–4 s | Spanish, 11 s | English, 2–3 s |
+|---|---|---|---|---|
+| Parakeet Ultra (from memory) | 0.40 s (0.54 s the first time) | 0.09–0.11 s | 0.15–0.17 s | 0.09–0.11 s |
+| Whisper (local) | 0.40 s | 0.51–0.53 s | 0.65–0.67 s | 0.51–0.52 s |
+
+Speaker-into-mic audio has no clear pauses, so Whisper did not stream here. Opening the mic takes longer than
+transcribing with Parakeet: with ⌃. you wait for it before you talk (the pill says "Speak now" when it's live); with
+⌥⌘ it opens while you hold the keys.
+
 #### Why Parakeet is faster
 
 - Whisper pads every request to 30 s of audio, so even a 3 s dictation costs ~430 ms. Parakeet's work grows with the
@@ -199,7 +213,7 @@ tools/latency.sh --file-mic                  # whisper-cli vs the loaded model v
 
 | Action | How |
 |---|---|
-| Start dictating | ⌃. (wait for the Tink and the red mic; the pill says "Opening the mic… wait" until then) |
+| Start dictating | ⌃. (wait for the Tink and the red "Speak now"; the pill says "Opening the mic… wait" until then). With ⌥⌘ (Settings › Shortcut) the mic opens while you hold the keys, so you can talk as you let go. |
 | Stop, transcribe, paste | ⌃. again |
 | Cancel | Menu › Cancel Recording, or `vtt cancel` |
 | Retry after an error | Menu › Retry Last Recording (re-sends the saved recording) |
@@ -254,10 +268,11 @@ your Mac.
 
 ```sh
 cd VoiceToText
-tools/test.sh .        # 53 unit tests
-tools/selftest.sh      # 101 in-app checks with a fake mic and transcriber
+tools/test.sh .        # 61 unit tests
+tools/selftest.sh      # 114 in-app checks with a fake mic and transcriber
 tools/e2e.sh           # 21 checks against the real API and the local model (`say` clips, silence, CLI, MCP, restart)
 tools/latency.sh --file-mic   # key-up to text with the local model: whisper-cli vs the loaded model vs streaming
+tools/latency.sh --mic        # through the real mic: time to open it, key-up to text, Parakeet and Whisper
 tools/snap.sh          # screenshots of every pill state and Settings, light and dark
 ```
 

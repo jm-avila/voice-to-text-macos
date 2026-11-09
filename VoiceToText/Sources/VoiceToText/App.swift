@@ -42,6 +42,7 @@ final class Services {
             hud.refresh()
             statusItem.refresh()
         }
+        dictation.ready = { [unowned self] in permissions.missing.isEmpty }
         dictation.blocked = { [unowned self] in
             guard !permissions.missing.isEmpty else { return false }
             settingsWindow.show()
@@ -110,6 +111,12 @@ final class Services {
                 guard let self else { return }
                 Task { await self.dictation.toggle() }
             }
+            // ⌥⌘ and the like fire on release: open the mic on the press, so the first words are heard.
+            hotkeys.onEarly = { [weak self] event in
+                guard let self else { return }
+                if event == .pressed { dictation.openEarly() } else { dictation.dropEarly() }
+            }
+            dictation.onEarlyExpired = { [weak self] in self?.hotkeys.spoilTap() }
         } else {
             // Shows the saved one without registering it.
             _ = hotkeys.change(to: dictation.settings.shortcut)

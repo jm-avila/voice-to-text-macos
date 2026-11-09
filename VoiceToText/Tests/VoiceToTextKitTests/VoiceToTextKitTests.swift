@@ -307,11 +307,25 @@ struct ChangeShortcut {
 
     /// Feeds a ⌥⌘ tap the held modifiers in turn (nil: a key or click) and gives the indexes where it fired.
     static func fires(_ steps: [UInt32?]) -> [Int] {
+        events(steps).filter { $0.event == .released }.map(\.index)
+    }
+
+    static func events(_ steps: [UInt32?]) -> [(index: Int, event: ModifierTap.Event)] {
         var tap = ModifierTap(optionCommand)
-        return steps.indices.filter { index in
-            guard let held = steps[index] else { tap.otherInput(); return false }
-            return tap.changed(to: held)
+        return steps.indices.compactMap { index in
+            let event = steps[index].map { tap.changed(to: $0) } ?? tap.otherInput()
+            return event.map { (index, $0) }
         }
+    }
+
+    @Test("A ⌥⌘ press says pressed at once, then released for a tap or spoiled for ⌥⌘I, once each")
+    func tapEvents() {
+        let tap = Self.events([Shortcut.option, Self.optionCommand, Shortcut.command, 0])
+        #expect(tap.map(\.index) == [1, 3] && tap.map(\.event) == [.pressed, .released])
+        let key = Self.events([Self.optionCommand, nil, nil, Self.optionCommand | Shortcut.shift, 0])
+        #expect(key.map(\.index) == [0, 1] && key.map(\.event) == [.pressed, .spoiled])
+        // A key before both are held: never pressed, so nothing to drop.
+        #expect(Self.events([Shortcut.option, nil, Self.optionCommand, 0]).isEmpty)
     }
 
     @Test("A ⌥⌘ tap fires when both are let go, in any order")

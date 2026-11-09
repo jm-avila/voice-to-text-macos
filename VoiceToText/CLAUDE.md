@@ -16,7 +16,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - `Package.swift` a Swift package. There is no Xcode project.
 - `build.sh` builds, signs (ad hoc), installs `~/Applications/VoiceToText.app`, and links `~/.local/bin/vtt`.
 - `tools/draw_icon.swift` the icon, drawn in code. `build.sh` turns it into `Resources/AppIcon.icns`.
-- `docs/` the brief and the user stories (S-001…S-017).
+- `docs/` the brief and the user stories (S-001…S-018).
 
 ## Files
 
@@ -27,7 +27,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - The local model runs as `whisper-server` on 127.0.0.1:8178 while it is selected (started by `Services.syncServer`, stopped when another model is picked or the app quits; a server already answering there is reused). Recordings stream to it in pieces cut at pauses (local model only); the whole file goes at key-up when the server isn't loaded yet or a piece fails, and whisper-cli when the server is down. `vtt status` shows `localModelLoaded`.
 - Parakeet Ultra (`parakeet-ultra-local`): FluidAudio, pinned by commit in `Package.swift` (no tagged release has Ultra), with no traits (ASR only). The model (610 MB) downloads on the first pick into `~/Library/Application Support/FluidAudio/Models/parakeet-ultra`, loads in ~0.1 s, stays loaded while selected (`ParakeetTranscriber.load`/`unload` from `Services.syncServer`). No streaming: a 23 s dictation takes ~0.1 s whole. The recorder's 16 kHz samples are kept in a `SampleBuffer` and go to Parakeet from memory at key-up (`vtt stop` reports `inMemory`); the m4a is still written, for Retry, and is used when samples are missing or the memory path fails. `vtt status` shows `parakeetModel`, `parakeetLoaded`.
 - `APP_STORE=<folder>` moves the store. A copy started with it never takes the global shortcut.
-- The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it. Modifiers alone (⌥⌘, key code `0xFFFF`) fire on release with no key or click between (`ModifierTap`); they use event monitors, so they need Accessibility.
+- The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it. Modifiers alone (⌥⌘, key code `0xFFFF`) fire on release with no key or click between (`ModifierTap`); they use event monitors, so they need Accessibility. The mic opens on the press (`ModifierTap` `pressed` → `Dictation.openEarly`, unseen, at most 3 s) and is dropped silently when it turns out to be another shortcut (`spoiled` → `dropEarly`); the release adopts it. Only the real copy wires this; the self-test calls `openEarly`/`dropEarly` directly.
 
 ## Build and check
 
@@ -37,7 +37,7 @@ This Mac has Command Line Tools only (no Xcode). See the `mac-app` skill for the
 - Unit tests: `tools/test.sh .`
 - Self-test with fakes (no mic, no API, no paste): `tools/selftest.sh`. Exit 0 when every check passes. Add a check per story to `SelfTest.swift`.
 - End to end against the real API (a few `say` clips): `tools/e2e.sh`. `--mic` also records 3 s from the real mic.
-- Speed of the local models: `tools/latency.sh` (whisper-cli vs server vs Parakeet). `--file-mic` streams a 23 s clip through the real pipeline (`APP_FAKE_MIC`, test copies only); `--mic` uses the speaker and mic (poor audio: the stream rarely cuts).
+- Speed of the local models: `tools/latency.sh` (whisper-cli vs server vs Parakeet). `--file-mic` streams a 23 s clip through the real pipeline (`APP_FAKE_MIC`, test copies only); `--mic` uses the speaker and mic for Parakeet and Whisper: time to open the mic, key-up to text, `inMemory` (poor audio: the stream rarely cuts).
 - Agent CLI rules: `APP_STORE=/tmp/VoiceToText-cli.store ~/Repositories/references/bama/skills/code/agent-cli/scripts/check-agent-cli.sh vtt`
 - Snapshots: `tools/snap.sh` writes `/tmp/VoiceToText-shots/hud-<state>-light|dark.png`, `menubar-<state>-…png` (drawn from the view: the menu bar window can't be screencaptured) and `settings-light|dark.png`. Open and judge every one after a UI change.
 - Grid: `tools/grid-lint.sh && swift tools/check-layout.swift /tmp/VoiceToText-shots/*-layout.json`

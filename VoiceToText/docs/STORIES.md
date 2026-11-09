@@ -151,3 +151,13 @@ Acceptance:
 - [self] With Parakeet the recorder's samples are kept, all of them go at key-up in the chosen language, and the file is not read; with samples missing, or a failure, the whole file goes instead.
 - [manual] `vtt stop --json` shows `"inMemory": true` and a lower `latencyMs` for a 20 s dictation.
 Status: done
+
+### S-018 Talk as soon as I press
+As the user, with a modifiers-only shortcut (⌥⌘) my first word is not lost: the mic opens while I hold the keys, and the pill says "Speak now" once it hears me.
+Screens: HUD
+Acceptance:
+- [unit] The tap says `pressed` when exactly the shortcut's modifiers are held, `spoiled` when a key, click or extra modifier follows, `released` only for a clean tap.
+- [self] Holding opens the mic with nothing shown; letting go records with no second start; another shortcut closes it silently; held past 3 s it closes; with the mic or paste not allowed nothing opens.
+- [snap] The pill shows "Speak now" in red for the first 1.5 s of recording, then the shortcut to stop.
+- [manual] Press ⌥⌘ and start talking at once: the first word is in the text. ⌥⌘I in Safari still opens the inspector.
+Status: done

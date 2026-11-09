@@ -15,8 +15,11 @@ nonisolated final class FakeRecorder: AudioRecording, @unchecked Sendable {
     private var onAudio: (@Sendable ([Float]) -> Void)?
     /// Whether the last start asked for the audio as it arrives (the local model streams).
     private(set) var streamed = false
+    /// How many times the mic was opened.
+    private(set) var starts = 0
 
     func start(to url: URL, timeout: Duration, onAudio: (@Sendable ([Float]) -> Void)?) async throws {
+        starts += 1
         // Like MicRecorder: the old recording goes before the mic opens.
         try? FileManager.default.removeItem(at: url)
         try? await Task.sleep(for: startDelay)

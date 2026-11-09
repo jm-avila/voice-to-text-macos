@@ -470,6 +470,65 @@ enum SelfTest {
         transcriber.reply = .success("Hello from the fake transcriber.")
         dictation.settings = beforeParakeet
 
+        // S-018 The mic opens on the press of a modifiers-only shortcut, so the first word is not lost.
+        recorder.startDelay = .milliseconds(200)
+        let opensBefore = recorder.starts
+        dictation.openEarly()
+        await wait(0.3)
+        check("S-018 holding ⌥⌘ opens the mic, with nothing shown yet",
+              recorder.isRecording && recorder.starts == opensBefore + 1 && dictation.state == .idle && !services.hud.isVisible)
+        await dictation.toggle()
+        check("S-018 letting go records with the mic already open: no second start, live at once",
+              dictation.state.name == "recording" && recorder.starts == opensBefore + 1)
+        _ = try? await dictation.stop(paste: false)
+        let noticeBeforeDrop = dictation.notice
+        dictation.openEarly()
+        await wait(0.05)
+        let opensBeforeDrop = recorder.starts
+        dictation.dropEarly()
+        dictation.openEarly()
+        await dictation.dropEarly()?.value
+        check("S-018 ⌥⌘ used for another shortcut closes the mic silently, and a press right after opens it again",
+              !recorder.isRecording && dictation.state == .idle && dictation.notice == noticeBeforeDrop
+                && recorder.starts == opensBeforeDrop + 1)
+        let opensBeforeCLI = recorder.starts
+        dictation.openEarly()
+        await wait(0.05)
+        _ = await agent("start")
+        check("S-018 a CLI start during the hold opens its own mic, without the speech from before",
+              dictation.state.name == "recording" && recorder.starts == opensBeforeCLI + 2)
+        await dictation.cancel()
+        // Held while a dropped file transcribes (longer than the limit): the mic still closes, and the tap is spoiled.
+        var expired = false
+        dictation.onEarlyExpired = { expired = true }
+        let delayBefore = transcriber.delay
+        transcriber.delay = Dictation.earlyLimit + .seconds(1)
+        let opensBeforeLimit = recorder.starts
+        dictation.openEarly()
+        let droppedDuringHold = Task { try? await dictation.transcribeDropped(droppedFile) }
+        await wait(Double(Dictation.earlyLimit.components.seconds) + 0.5)
+        check("S-018 held and never let go, the mic closes after the limit, even while a file transcribes",
+              !recorder.isRecording && recorder.starts == opensBeforeLimit + 1 && expired)
+        _ = await droppedDuringHold.value
+        transcriber.delay = .seconds(1)
+        dictation.openEarly()
+        let droppedThenReleased = Task { try? await dictation.transcribeDropped(droppedFile) }
+        await wait(0.3)
+        await dictation.toggle()
+        await wait(0.1)
+        check("S-018 let go while a file transcribes: nothing starts and the mic closes", !recorder.isRecording)
+        _ = await droppedThenReleased.value
+        transcriber.delay = delayBefore
+        dictation.onEarlyExpired = {}
+        dictation.ready = { false }
+        let opensBeforeBlocked = recorder.starts
+        dictation.openEarly()
+        await wait(0.3)
+        check("S-018 with the mic or paste not allowed, the press opens nothing",
+              recorder.starts == opensBeforeBlocked)
+        dictation.ready = { true }
+        recorder.startDelay = .milliseconds(100)
+
         // S-015 One click between Spanish and English in the menu.
         let languages = NSMenu()
         icon.menuNeedsUpdate(languages)

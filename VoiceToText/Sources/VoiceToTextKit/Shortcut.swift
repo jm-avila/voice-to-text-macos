@@ -67,7 +67,19 @@ public struct Shortcut: Codable, Equatable, Sendable {
 /// Watches modifier changes for a modifiers-only shortcut. It fires when the
 /// modifiers go back to none after being exactly the shortcut's, with no key,
 /// click, or extra modifier in between, so ⌥⌘I and ⌥⌘-click still reach apps.
+/// It also says the moment they are first held (`pressed`), so the mic can
+/// start opening before the release, and when such a press turns out to be
+/// another shortcut (`spoiled`), so it can be dropped.
 public struct ModifierTap: Sendable {
+    public enum Event: Equatable, Sendable {
+        /// Exactly the shortcut's modifiers are held: maybe a tap.
+        case pressed
+        /// Let go with nothing in between: a tap.
+        case released
+        /// After `pressed`, a key, click, or extra modifier: not a tap.
+        case spoiled
+    }
+
     public let modifiers: UInt32
     private var held: UInt32 = 0
     private var reached = false
@@ -75,19 +87,28 @@ public struct ModifierTap: Sendable {
 
     public init(_ modifiers: UInt32) { self.modifiers = modifiers }
 
-    /// The modifiers now held. True when the tap is done: fire.
-    public mutating func changed(to now: UInt32) -> Bool {
+    /// The modifiers now held.
+    public mutating func changed(to now: UInt32) -> Event? {
         held = now
         if now == 0 {
             defer { reached = false; spoiled = false }
-            return reached && !spoiled
+            return reached && !spoiled ? .released : nil
         }
-        if now & ~modifiers != 0 { spoiled = true } else if now == modifiers { reached = true }
-        return false
+        if now & ~modifiers != 0 { return spoil() }
+        if now == modifiers, !reached, !spoiled {
+            reached = true
+            return .pressed
+        }
+        return nil
     }
 
     /// A key or click. Spoils the tap if modifiers are held.
-    public mutating func otherInput() {
-        if held != 0 { spoiled = true }
+    public mutating func otherInput() -> Event? {
+        held != 0 ? spoil() : nil
+    }
+
+    private mutating func spoil() -> Event? {
+        defer { spoiled = true }
+        return reached && !spoiled ? .spoiled : nil
     }
 }
