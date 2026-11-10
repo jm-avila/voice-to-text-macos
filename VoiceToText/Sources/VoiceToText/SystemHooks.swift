@@ -69,6 +69,18 @@ final class Permissions {
     private(set) var localModel = LocalWhisper.status
     /// Shows "Downloaded" once Parakeet's first download finishes.
     private(set) var parakeetModel = Parakeet.status
+    /// Whether each local model is loaded, loading, or failed. Set by polling, and by the self-test.
+    var whisper = ModelResidency.off
+    var parakeet = ModelResidency.off
+    /// Where polling reads them: the live server and Parakeet (Services wires it).
+    @ObservationIgnored var residency: () -> (whisper: ModelResidency, parakeet: ModelResidency)? = { nil }
+
+    /// While a dictation waits for its model to load (or download): what to say instead of "Transcribing…".
+    /// Only Parakeet: Whisper never waits for its server (whisper-cli takes over).
+    func waiting(for model: String) -> String? {
+        guard model == Parakeet.model, parakeet == .loading else { return nil }
+        return parakeetModel == .ready ? "Loading Parakeet…" : "Downloading Parakeet (610 MB)…"
+    }
     @ObservationIgnored private var timer: Timer?
 
     func startPolling() {
@@ -91,6 +103,10 @@ final class Permissions {
         if local != localModel { localModel = local }
         let parakeet = Parakeet.status
         if parakeet != parakeetModel { parakeetModel = parakeet }
+        if let loaded = residency() {
+            if loaded.whisper != whisper { whisper = loaded.whisper }
+            if loaded.parakeet != self.parakeet { self.parakeet = loaded.parakeet }
+        }
     }
 
     /// Asks for the microphone the first time; true when it may record.
@@ -196,10 +212,17 @@ final class HotkeyCenter {
     static let shared = HotkeyCenter()
 
     private(set) var combo = Shortcut.standard
-    /// noErr when registered. Anything else: another app owns the combo.
-    private(set) var status: OSStatus = noErr
-    @ObservationIgnored private var ref: EventHotKeyRef?
-    @ObservationIgnored private var monitors: [Any] = []
+    private enum Registration {
+        /// Never registered (a test copy), or let go while Settings records a new one.
+        case none
+        /// A key with modifiers: Carbon's hotkey.
+        case hotKey(EventHotKeyRef)
+        /// Modifiers alone: event monitors watch for the tap.
+        case tap(monitors: [Any])
+        /// Another app owns the combo.
+        case taken(OSStatus)
+    }
+    private var registration = Registration.none
     @ObservationIgnored private var tap = ModifierTap(0)
     @ObservationIgnored private var action: (() -> Void)?
     /// A modifiers-only shortcut's press (before it fires on release) and a press
@@ -208,10 +231,16 @@ final class HotkeyCenter {
     @ObservationIgnored private var handlerInstalled = false
 
     /// A modifiers-only tap also needs Accessibility: without it the monitors see nothing.
-    var isRegistered: Bool { status == noErr && (ref != nil || (!monitors.isEmpty && AXIsProcessTrusted())) }
+    var isRegistered: Bool {
+        switch registration {
+        case .hotKey: true
+        case .tap: AXIsProcessTrusted()
+        case .none, .taken: false
+        }
+    }
     /// Registering failed: another app owns the combo. False before the first
     /// try, so a test copy (which never registers) shows no warning.
-    var isTaken: Bool { status != noErr }
+    var isTaken: Bool { if case .taken = registration { true } else { false } }
 
     func register(_ combo: Shortcut, action: @escaping () -> Void) {
         unregister()
@@ -219,14 +248,14 @@ final class HotkeyCenter {
         self.action = action
         if combo.isModifiersOnly {
             watchTap(combo.modifiers)
-            status = noErr
             return
         }
         installHandler()
         let id = EventHotKeyID(signature: OSType(0x5654_5458), id: 1)   // 'VTTX', 1
-        status = RegisterEventHotKey(combo.keyCode, combo.modifiers, id, GetApplicationEventTarget(),
-                                     OptionBits(kEventHotKeyExclusive), &ref)
-        if status != noErr { ref = nil }
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(combo.keyCode, combo.modifiers, id, GetApplicationEventTarget(),
+                                         OptionBits(kEventHotKeyExclusive), &ref)
+        registration = if status == noErr, let ref { .hotKey(ref) } else { .taken(status) }
     }
 
     /// Tries again with the same combo and action (after the other app let go).
@@ -252,10 +281,12 @@ final class HotkeyCenter {
     func resume() { retry() }
 
     func unregister() {
-        if let ref { UnregisterEventHotKey(ref) }
-        ref = nil
-        monitors.forEach(NSEvent.removeMonitor)
-        monitors = []
+        switch registration {
+        case .hotKey(let ref): UnregisterEventHotKey(ref)
+        case .tap(let monitors): monitors.forEach(NSEvent.removeMonitor)
+        case .none, .taken: break
+        }
+        registration = .none
     }
 
     func fire() { action?() }
@@ -267,7 +298,7 @@ final class HotkeyCenter {
     private func watchTap(_ modifiers: UInt32) {
         tap = ModifierTap(modifiers)
         let events: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
-        monitors = [
+        registration = .tap(monitors: [
             NSEvent.addGlobalMonitorForEvents(matching: events) { event in
                 MainActor.assumeIsolated { HotkeyCenter.shared.handleTap(event) }
             },
@@ -275,11 +306,11 @@ final class HotkeyCenter {
                 HotkeyCenter.shared.handleTap(event)
                 return event
             },
-        ].compactMap { $0 }
+        ].compactMap { $0 })
     }
 
     func handleTap(_ event: NSEvent) {
-        guard !monitors.isEmpty else { return }
+        guard case .tap = registration else { return }
         let tapEvent = event.type == .flagsChanged ? tap.changed(to: Shortcut.modifiers(event.modifierFlags)) : tap.otherInput()
         switch tapEvent {
         case .released?: fire()

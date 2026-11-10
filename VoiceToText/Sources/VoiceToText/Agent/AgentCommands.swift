@@ -33,22 +33,23 @@ enum AgentCommands {
         AgentCommand(name: "toggle", summary: "Start when idle; stop, transcribe, and print the text when recording.",
                      example: "vtt toggle") { _, services in
             let dictation = services.dictation
-            switch dictation.state {
-            case .idle:
+            guard dictation.allows(.stop) else {
+                // Busy while the mic opens or it transcribes: start says so.
                 try await dictation.start()
                 return ["state": dictation.state.name]
-            case .recording:
-                let text = try await dictation.stop(paste: false)
-                return ["state": dictation.state.name, "text": text]
-            case .starting, .transcribing:
-                throw DictationError.busy(dictation.state.name)
             }
+            let text = try await dictation.stop(paste: false)
+            return ["state": dictation.state.name, "text": text]
         },
-        AgentCommand(name: "cancel", summary: "Stop recording and throw the audio away.",
+        AgentCommand(name: "cancel", summary: "Stop recording and throw the audio away. While transcribing, stop waiting (Retry sends it again).",
                      example: "vtt cancel") { _, services in
-            let was = services.dictation.state
-            await services.dictation.cancel()
-            return ["canceled": was == .starting || was.name == "recording"]
+            ["canceled": await services.dictation.cancel()]
+        },
+        AgentCommand(name: "retry", summary: "Send the last failed (or canceled) recording or dropped file again, and print the text. --paste also pastes a recording.",
+                     params: [.init(name: "paste", kind: .boolean, help: "also paste the text into the app in front")],
+                     example: "vtt retry --json") { args, services in
+            let text = try await services.dictation.retry(paste: try args.bool("paste") ?? false)
+            return ["text": text, "saved": !text.isEmpty]
         },
         AgentCommand(name: "transcribe", summary: "Transcribe an audio file (m4a, mp3, wav, …) with the current model and language. Not saved to history.",
                      params: [.init(name: "file", required: true, positional: true, isPath: true, help: "the audio file")],
@@ -103,6 +104,10 @@ extension Services {
         let dictation = self.dictation
         var status: JSONObject = [
             "state": dictation.state.name,
+            // With the unseen one: "priming" while a held ⌥⌘ opens the mic before it fires.
+            "phase": dictation.phaseName,
+            // The commands that work right now. Anything else answers busy, not recording, or nothing to retry.
+            "actions": Self.actions(dictation),
             "model": dictation.settings.model,
             "language": dictation.settings.languageCode ?? "auto",
             "sounds": dictation.settings.sounds,
@@ -120,10 +125,40 @@ extension Services {
             "localModelLoaded": server?.isReady ?? false,
             "parakeetModel": Parakeet.status.rawValue,
             "parakeetLoaded": parakeet?.isLoaded ?? false,
+            "models": [
+                LocalWhisper.model: Self.model(installed: LocalWhisper.status.rawValue, permissions.whisper),
+                Parakeet.model: Self.model(installed: Parakeet.status.rawValue, permissions.parakeet),
+            ],
         ]
+        switch dictation.retryable {
+        case .recording?: status["retry"] = "recording"
+        case .file(let file)?: status["retry"] = file.path
+        case nil: break
+        }
+        if let outcome = dictation.lastOutcome { status["lastOutcome"] = outcome.name }
         if case .recording = dictation.state { status["recordingSeconds"] = (dictation.elapsed * 10).rounded() / 10 }
         if let error = dictation.lastError { status["lastError"] = error }
+        if let waiting = permissions.waiting(for: dictation.settings.model), dictation.state == .transcribing {
+            status["waiting"] = waiting
+        }
         if FileManager.default.fileExists(atPath: store.recordingURL.path) { status["lastRecording"] = store.recordingURL.path }
         return status
+    }
+
+    /// toggle is in the list whenever start or stop is.
+    static func actions(_ dictation: Dictation) -> [String] {
+        let allowed = dictation.allowedActions
+        var names = allowed.map(\.rawValue)
+        if allowed.contains(.start) || allowed.contains(.stop) {
+            names.insert("toggle", at: names.firstIndex(of: "cancel") ?? names.firstIndex(of: "retry") ?? names.endIndex)
+        }
+        return names
+    }
+
+    /// Downloaded (installed), and whether it is in memory now; why it failed to load.
+    static func model(installed: String, _ residency: ModelResidency) -> JSONObject {
+        var model: JSONObject = ["installed": installed, "residency": residency.name]
+        if let error = residency.error { model["error"] = error }
+        return model
     }
 }

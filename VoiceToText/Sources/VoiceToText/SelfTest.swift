@@ -498,17 +498,28 @@ enum SelfTest {
         check("S-018 a CLI start during the hold opens its own mic, without the speech from before",
               dictation.state.name == "recording" && recorder.starts == opensBeforeCLI + 2)
         await dictation.cancel()
-        // Held while a dropped file transcribes (longer than the limit): the mic still closes, and the tap is spoiled.
+        // Held and never let go: the mic closes after the limit, and the tap is spoiled.
         var expired = false
         dictation.onEarlyExpired = { expired = true }
         let delayBefore = transcriber.delay
-        transcriber.delay = Dictation.earlyLimit + .seconds(1)
         let opensBeforeLimit = recorder.starts
         dictation.openEarly()
+        await wait(0.3)
+        let holding = result(await agent("status"))
+        check("S-018 while held, status says priming (the state stays idle: nothing shows)",
+              holding?["phase"] as? String == "priming" && holding?["state"] as? String == "idle")
+        await wait(Double(Dictation.earlyLimit.components.seconds))
+        check("S-018 held and never let go, the mic closes after the limit, and the tap is spoiled",
+              !recorder.isRecording && recorder.starts == opensBeforeLimit + 1 && expired && dictation.phaseName == "idle")
+        // A file dropped during the hold: that mic was not for it, so it closes at once.
+        expired = false
+        transcriber.delay = .seconds(1)
+        dictation.openEarly()
+        await wait(0.3)
         let droppedDuringHold = Task { try? await dictation.transcribeDropped(droppedFile) }
-        await wait(Double(Dictation.earlyLimit.components.seconds) + 0.5)
-        check("S-018 held and never let go, the mic closes after the limit, even while a file transcribes",
-              !recorder.isRecording && recorder.starts == opensBeforeLimit + 1 && expired)
+        await wait(0.1)
+        check("S-018 a file dropped during the hold closes the early mic at once",
+              !recorder.isRecording && !expired && dictation.state == .transcribing)
         _ = await droppedDuringHold.value
         transcriber.delay = .seconds(1)
         dictation.openEarly()
@@ -528,6 +539,77 @@ enum SelfTest {
               recorder.starts == opensBeforeBlocked)
         dictation.ready = { true }
         recorder.startDelay = .milliseconds(100)
+
+        // One state machine: what each state allows is shown to agents, and a notice never covers a live dictation.
+        transcriber.delay = .milliseconds(50)
+        await wait(1.5)
+        let idleStatus = result(await agent("status"))
+        check("status lists what works now: idle", idleStatus?["actions"] as? [String] == ["start", "toggle"]
+                && idleStatus?["phase"] as? String == "idle", "\(idleStatus?["actions"] ?? "")")
+        try? await dictation.start()
+        let recordingStatus = result(await agent("status"))
+        check("status lists what works now: recording", recordingStatus?["actions"] as? [String] == ["stop", "toggle", "cancel"]
+                && recordingStatus?["phase"] as? String == "recording")
+        dictation.copy("An older one.")
+        check("copying a Recent item while recording keeps the recording on the pill", dictation.notice == nil
+                && dictation.state.name == "recording" && paster.pasteboard.string(forType: .string) == "An older one.")
+        await dictation.cancel()
+        await wait(1.5)
+        // Cancel while transcribing: it stops waiting, and Retry sends it again.
+        transcriber.delay = .seconds(1)
+        transcriber.reply = .success("Too late.")
+        try? await dictation.start()
+        let waiting = Task { try? await dictation.stop(paste: false) }
+        await wait(0.2)
+        check("status lists what works now: transcribing", result(await agent("status"))?["actions"] as? [String] == ["cancel"])
+        let canceledWait = result(await agent("cancel"))
+        check("cancel while transcribing stops waiting at once, with Retry offered", canceledWait?["canceled"] as? Bool == true
+                && dictation.state == .idle && dictation.notice == .canceled && dictation.retryable == .recording)
+        let late = await waiting.value
+        check("the canceled text is thrown away, not saved", late == nil && !dictation.history.contains { $0.text == "Too late." })
+        transcriber.delay = .milliseconds(50)
+        transcriber.reply = .success("Sent again.")
+        let retriedByAgent = result(await agent("retry"))
+        check("vtt retry sends it again", retriedByAgent?["text"] as? String == "Sent again." && dictation.retryable == nil)
+        // A dropped file that failed: Retry sends that file, not the last recording.
+        transcriber.reply = .failure(TranscriptionError.network("offline"))
+        _ = try? await dictation.transcribeDropped(droppedFile)
+        let afterDrop = NSMenu()
+        icon.menuNeedsUpdate(afterDrop)
+        let retryShown = result(await agent("status"))?["retry"] as? String
+        check("a dropped file that failed is what Retry offers", dictation.retryable == .file(droppedFile)
+                && afterDrop.items.contains { $0.title == "Retry dropped.m4a" } && retryShown == droppedFile.path)
+        transcriber.reply = .success("The file again.")
+        let fileAgain = try? await dictation.retry(paste: true)
+        check("Retry sends the dropped file again and copies it", fileAgain == "The file again."
+                && transcriber.calls.last?.file == droppedFile && dictation.retryable == nil && dictation.notice == .copied)
+        await wait(1.5)
+        // Waiting for Parakeet's download: the menu and status say so, and the menu can cancel.
+        let settingsBeforeWait = dictation.settings
+        dictation.settings.model = Parakeet.model
+        permissions.parakeet = .loading
+        transcriber.delay = .seconds(1)
+        try? await dictation.start()
+        let downloading = Task { try? await dictation.stop(paste: false) }
+        await wait(0.2)
+        let waitMenu = NSMenu()
+        icon.menuNeedsUpdate(waitMenu)
+        let expectedWait = Parakeet.status == .ready ? "Loading Parakeet…" : "Downloading Parakeet (610 MB)…"
+        check("while Parakeet loads, the menu says so instead of Transcribing, and offers Cancel",
+              waitMenu.items.contains { $0.title == expectedWait } && waitMenu.items.contains { $0.title == "Cancel Transcription" })
+        check("and status says what it waits for", result(await agent("status"))?["waiting"] as? String == expectedWait)
+        await dictation.cancel()
+        _ = await downloading.value
+        permissions.parakeet = .failed("Parakeet: offline")
+        let models = result(await agent("status"))?["models"] as? JSONObject
+        check("a model that did not load says why in status",
+              (models?[Parakeet.model] as? JSONObject)?["error"] as? String == "Parakeet: offline"
+                && (models?[Parakeet.model] as? JSONObject)?["residency"] as? String == "failed")
+        permissions.parakeet = .off
+        transcriber.delay = .milliseconds(100)
+        transcriber.reply = .success("Hello from the fake transcriber.")
+        dictation.settings = settingsBeforeWait
+        await wait(1.5)
 
         // S-015 One click between Spanish and English in the menu.
         let languages = NSMenu()
