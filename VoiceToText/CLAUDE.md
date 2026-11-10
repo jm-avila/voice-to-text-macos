@@ -7,7 +7,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 ## Layout
 
 - `Sources/VoiceToText/` the app.
-  - `Dictation.swift` the one state machine (idle, starting, recording, transcribing). Hotkey, menu, and CLI all go through it.
+  - `Dictation.swift` the one state machine. A private `Phase` enum (idle, priming, starting, recording, transcribing) holds each state's data, so stray flags can't disagree; `state` is what the person sees (priming, the unseen early mic, shows as idle). `allows(_:)` is the one table of what each state permits; entry points check it and `vtt status` lists it as `actions`. A notice shows only when back to idle. Cancel while transcribing stops waiting and keeps it for Retry; `retryable` says what Retry resends (the recording or a dropped file). Hotkey, menu, and CLI all go through it.
   - `Recorder.swift` the mic (`AudioRecording`), `SystemHooks.swift` hotkey, permissions, ⌘V.
   - `StatusItem.swift` the menu bar icon (level + timer, dots, ✓/✕, failure dot; click to dictate, hide when idle, file drop) and menu, `HUD.swift` the floating pill, `SettingsView.swift` the one Settings window.
   - `App.swift` wires `Services` (live, or `testing()` with the fakes in `Fakes.swift`).
@@ -16,7 +16,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - `Package.swift` a Swift package. There is no Xcode project.
 - `build.sh` builds, signs (ad hoc), installs `~/Applications/VoiceToText.app`, and links `~/.local/bin/vtt`.
 - `tools/draw_icon.swift` the icon, drawn in code. `build.sh` turns it into `Resources/AppIcon.icns`.
-- `docs/` the brief and the user stories (S-001…S-018).
+- `docs/` the brief and the user stories (S-001…S-019).
 
 ## Files
 
@@ -25,6 +25,7 @@ version one folder up (`../SPEC.md`) and shares its files.
 - The OpenAI key: env `OPENAI_API_KEY`, else Keychain through `/usr/bin/security` (account `agent-secrets`, service `OPENAI_API_KEY`).
 - The local model: `models/ggml-large-v3-turbo.bin` and `models/ggml-silero-v5.1.2.bin` in the real store, even with `APP_STORE` (one 1.6 GB copy). `tools/get-model.sh` gets them and whisper.cpp.
 - The local model runs as `whisper-server` on 127.0.0.1:8178 while it is selected (started by `Services.syncServer`, stopped when another model is picked or the app quits; a server already answering there is reused). Recordings stream to it in pieces cut at pauses (local model only); the whole file goes at key-up when the server isn't loaded yet or a piece fails, and whisper-cli when the server is down. `vtt status` shows `localModelLoaded`.
+- Both local models report a `ModelResidency` (off, loading, ready, failed with the reason). `Permissions` polls it each second (and `syncServer` refreshes it when a load ends) for Settings (Loaded, Loading…, Did not load + Try Again) and the pill ("Loading Parakeet…" / "Downloading Parakeet (610 MB)…" instead of "Transcribing…"); `vtt status` reads the models live under `models`. A canceled request never marks the server as gone.
 - Parakeet Ultra (`parakeet-ultra-local`): FluidAudio, pinned by commit in `Package.swift` (no tagged release has Ultra), with no traits (ASR only). The model (610 MB) downloads on the first pick into `~/Library/Application Support/FluidAudio/Models/parakeet-ultra`, loads in ~0.1 s, stays loaded while selected (`ParakeetTranscriber.load`/`unload` from `Services.syncServer`). No streaming: a 23 s dictation takes ~0.1 s whole. The recorder's 16 kHz samples are kept in a `SampleBuffer` and go to Parakeet from memory at key-up (`vtt stop` reports `inMemory`); the m4a is still written, for Retry, and is used when samples are missing or the memory path fails. `vtt status` shows `parakeetModel`, `parakeetLoaded`.
 - `APP_STORE=<folder>` moves the store. A copy started with it never takes the global shortcut.
 - The shortcut: `shortcut` in settings.json (default ⌃.), changed in Settings (`ShortcutRecorder` in `SystemHooks.swift`). `vtt status` shows it. Modifiers alone (⌥⌘, key code `0xFFFF`) fire on release with no key or click between (`ModifierTap`); they use event monitors, so they need Accessibility. The mic opens on the press (`ModifierTap` `pressed` → `Dictation.openEarly`, unseen, at most 3 s) and is dropped silently when it turns out to be another shortcut (`spoiled` → `dropEarly`); the release adopts it. Only the real copy wires this; the self-test calls `openEarly`/`dropEarly` directly.

@@ -4,16 +4,18 @@ import VoiceToTextKit
 
 /// A small glass capsule at the bottom of the screen while dictating:
 /// "Opening the mic…", then a red mic with a level meter and the time, then
-/// "Transcribing…", then the result for a moment. It never takes focus or
+/// "Transcribing…" (or "Downloading Parakeet…" while it waits for the model), then the result for a moment. It never takes focus or
 /// clicks, so your typing and the paste go to the app you are in.
 final class RecordingHUD {
     static let size = NSSize(width: 480, height: 120)
 
     private let dictation: Dictation
+    private let permissions: Permissions
     private var panel: NSPanel?
 
-    init(dictation: Dictation) {
+    init(dictation: Dictation, permissions: Permissions) {
         self.dictation = dictation
+        self.permissions = permissions
     }
 
     var window: NSWindow? { panel }
@@ -39,7 +41,7 @@ final class RecordingHUD {
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-        let host = NSHostingView(rootView: HUDView(dictation: dictation))
+        let host = NSHostingView(rootView: HUDView(dictation: dictation, permissions: permissions))
         host.sizingOptions = []
         panel.contentView = host
         self.panel = panel
@@ -57,6 +59,8 @@ final class RecordingHUD {
 
 struct HUDView: View {
     let dictation: Dictation
+    /// The local models' load state: a dictation waiting for Parakeet's download says so.
+    let permissions: Permissions
     /// How long the HUD says "Speak now" once the mic is live.
     static let speakNow: TimeInterval = 1.5
 
@@ -107,7 +111,7 @@ struct HUDView: View {
             case .transcribing:
                 HStack(spacing: Space.sm) {
                     ProgressView().controlSize(.small)
-                    Text("Transcribing…")
+                    Text(permissions.waiting(for: dictation.settings.model) ?? "Transcribing…")
                 }
             }
         }

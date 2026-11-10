@@ -34,7 +34,7 @@ final class Services {
         self.parakeet = parakeet
         dictation = Dictation(store: store, recorder: recorder, transcriber: transcriber, streamer: streamer,
                               sampler: sampler ?? parakeet, paster: Paster(pasteboard: pasteboard))
-        hud = RecordingHUD(dictation: dictation)
+        hud = RecordingHUD(dictation: dictation, permissions: permissions)
         shortcutRecorder = ShortcutRecorder(hotkeys: hotkeys, dictation: dictation)
         settingsWindow = SettingsWindow { [unowned self] in self }
         statusItem = StatusItem(dictation: dictation, hotkeys: hotkeys, permissions: permissions) { [unowned self] in settingsWindow.show() }
@@ -43,6 +43,11 @@ final class Services {
             statusItem.refresh()
         }
         dictation.ready = { [unowned self] in permissions.missing.isEmpty }
+        permissions.residency = { [server, parakeet] in
+            // The fakes have neither: the self-test and snapshots set them by hand.
+            guard server != nil || parakeet != nil else { return nil }
+            return (server?.residency ?? .off, parakeet?.residency ?? .off)
+        }
         dictation.blocked = { [unowned self] in
             guard !permissions.missing.isEmpty else { return false }
             settingsWindow.show()
@@ -79,21 +84,23 @@ final class Services {
     /// downloads) when it is chosen and is freed when another one is.
     func syncServer() {
         let model = dictation.settings.model
+        // Settings, the HUD, and `vtt status` show the result (loaded, or failed and why) at once.
         if let server {
             if model == LocalWhisper.model, LocalWhisper.status == .ready {
-                Task { await server.start() }
+                Task { await server.start(); permissions.refresh() }
             } else {
                 server.stop()
             }
         }
         if let parakeet {
             if model == Parakeet.model {
-                // A failure (no network for the first download) shows at the next dictation, which loads again.
-                Task { try? await parakeet.load() }
+                // A failure (no network for the first download) shows in Settings; the next dictation loads again.
+                Task { _ = try? await parakeet.load(); permissions.refresh() }
             } else {
                 parakeet.unload()
             }
         }
+        permissions.refresh()
     }
 
     func start() {

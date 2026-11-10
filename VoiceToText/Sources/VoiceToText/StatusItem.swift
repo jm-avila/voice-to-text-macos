@@ -104,7 +104,7 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
         case (.transcribing, _):
             symbolName = "dots"
             image = Self.dots(lit: frame % 3)
-            tip = "Transcribing"
+            tip = permissions.waiting(for: dictation.settings.model) ?? "Transcribing"
         }
         if image == nil {
             image = NSImage(systemSymbolName: symbolName, accessibilityDescription: tip)
@@ -272,8 +272,12 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             menu.addItem(action("Start Dictation", key: combo.menuKey, modifiers: combo.menuModifiers) { [dictation] in
                 Task { await dictation.toggle() }
             })
-            if dictation.canRetry {
-                menu.addItem(action("Retry Last Recording") { [dictation] in
+            if let retryable = dictation.retryable {
+                let title = switch retryable {
+                case .recording: "Retry Last Recording"
+                case .file(let file): "Retry \(Self.short(file.lastPathComponent, limit: 32))"
+                }
+                menu.addItem(action(title) { [dictation] in
                     Task { _ = try? await dictation.retry(paste: true) }
                 })
             }
@@ -285,7 +289,8 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
             }
             menu.addItem(action("Cancel Recording") { [dictation] in Task { await dictation.cancel() } })
         case .transcribing:
-            break
+            // A long wait (Parakeet's first download): stop waiting; Retry sends it again later.
+            menu.addItem(action("Cancel Transcription") { [dictation] in Task { await dictation.cancel() } })
         }
         if hotkeys.isTaken {
             menu.addItem(disabled("\(shortcut) is taken by another app. See Settings"))
@@ -330,7 +335,7 @@ final class StatusItem: NSObject, NSMenuDelegate, NSWindowDelegate {
         case .idle: dictation.lastError.map { "Last try failed: \(Self.short($0))" } ?? "Press \(hotkeys.combo.symbols) to dictate"
         case .starting: "Opening the mic…"
         case .recording: "Recording \(Elapsed.text(dictation.elapsed))"
-        case .transcribing: "Transcribing…"
+        case .transcribing: permissions.waiting(for: dictation.settings.model) ?? "Transcribing…"
         }
     }
 

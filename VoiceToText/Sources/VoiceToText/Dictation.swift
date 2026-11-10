@@ -20,12 +20,36 @@ enum DictationState: Equatable {
     }
 }
 
+/// What can be done right now. Every entry point checks it, and `vtt status` lists it.
+enum DictationAction: String, CaseIterable {
+    case start, stop, cancel, retry
+}
+
+/// What Retry sends again after a failure.
+enum Retryable: Equatable {
+    /// The last recording, kept in the store.
+    case recording
+    /// A file dropped on the menu bar icon.
+    case file(URL)
+}
+
 /// The result the HUD shows for a moment after a dictation.
 enum Notice: Equatable {
     case pasted, copied, nothingHeard, canceled
     case error(String)
 
     var duration: Duration { if case .error = self { .seconds(4) } else { .seconds(1.2) } }
+
+    /// For `vtt status`.
+    var name: String {
+        switch self {
+        case .pasted: "pasted"
+        case .copied: "copied"
+        case .nothingHeard: "nothingHeard"
+        case .canceled: "canceled"
+        case .error: "failed"
+        }
+    }
 }
 
 nonisolated enum DictationError: LocalizedError {
@@ -38,7 +62,7 @@ nonisolated enum DictationError: LocalizedError {
         switch self {
         case .busy(let state): state == "recording" ? "already recording" : "busy: \(state)"
         case .notRecording: "not recording"
-        case .nothingToRetry: "there is no failed recording to retry"
+        case .nothingToRetry: "there is no failed recording or file to retry"
         case .canceled: "canceled"
         }
     }
@@ -99,6 +123,44 @@ final class Sounds {
     }
 }
 
+/// One opening of the mic, and where its samples go while it records.
+private final class Mic {
+    let opening: Task<Void, Error>
+    /// Local Whisper with its server loaded: transcribed while it is spoken.
+    let stream: StreamingTranscription?
+    /// Parakeet: kept for key-up.
+    let buffer: SampleBuffer?
+
+    init(opening: Task<Void, Error>, stream: StreamingTranscription?, buffer: SampleBuffer?) {
+        self.opening = opening
+        self.stream = stream
+        self.buffer = buffer
+    }
+}
+
+/// One transcription. A cancel leaves it running and throws its text away.
+private final class Job {
+    /// What Retry sends again if it fails or is canceled.
+    let source: Retryable
+    var stream: StreamingTranscription?
+    /// The recorder finishing the file at key-up. A cancel makes the next start (and Retry) wait for it.
+    var stopping: Task<TimeInterval, Never>?
+
+    init(_ source: Retryable) { self.source = source }
+}
+
+/// Where a dictation is. Each case holds what only it has, so a stream with no
+/// mic, or a cancel left over from an earlier start, cannot happen.
+private enum Phase {
+    case idle
+    /// A modifiers-only shortcut is held: the mic opens, unseen, before it fires on release.
+    case priming(Mic)
+    /// The mic is opening. A cancel now stops it as soon as it is open.
+    case starting(Mic, cancelRequested: Bool)
+    case recording(Mic, since: Date)
+    case transcribing(Job)
+}
+
 /// Push to talk: start, stop, transcribe, paste, save. The hotkey, the menu,
 /// and the agent CLI all go through here, so there is one state to trust.
 @Observable
@@ -107,13 +169,15 @@ final class Dictation {
     /// Shorter than this is a press and a change of mind: nothing to send.
     static let shortest: TimeInterval = 0.3
 
-    private(set) var state = DictationState.idle
+    private var phase = Phase.idle
     private(set) var notice: Notice?
+    /// The last result, kept after the notice fades (`vtt status`).
+    private(set) var lastOutcome: Notice?
     private(set) var lastError: String?
     /// Every saved transcript, oldest first.
     private(set) var history: [HistoryEntry]
-    /// The last recording failed to transcribe and is still on disk.
-    private(set) var canRetry = false
+    /// The last try failed (or was canceled while transcribing), and what Retry sends again.
+    private(set) var retryable: Retryable?
     /// How many tries failed so far. The menu bar dot shows until the menu opens after one.
     private(set) var failures = 0
     /// Key-up to text of the last dictation: how fast it felt.
@@ -149,16 +213,9 @@ final class Dictation {
     @ObservationIgnored var blocked: () -> Bool = { false }
     /// The mic and paste are allowed, asked without showing anything (for `openEarly`).
     @ObservationIgnored var ready: () -> Bool = { true }
-    @ObservationIgnored private var cancelRequested = false
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
-    /// A cancel still stopping the recorder. The next start waits for it.
+    /// The recorder still closing after a cancel or a dropped early mic. The next start waits for it.
     @ObservationIgnored private var canceling: Task<Void, Never>?
-    /// The dictation being transcribed while it is spoken (local model, server ready).
-    @ObservationIgnored private var stream: StreamingTranscription?
-    /// The dictation's samples, kept for Parakeet.
-    @ObservationIgnored private var buffer: SampleBuffer?
-    /// The mic opened on the press of a modifiers-only shortcut, before it fired.
-    @ObservationIgnored private var early: Task<Void, Error>?
 
     init(store: Store, recorder: AudioRecording, transcriber: Transcribing, streamer: ChunkTranscribing? = nil,
          sampler: SampleTranscribing? = nil, paster: Paster) {
@@ -172,19 +229,48 @@ final class Dictation {
         history = store.loadHistory()
     }
 
-    var elapsed: TimeInterval {
-        if case .recording(let since) = state { Date.now.timeIntervalSince(since) } else { 0 }
+    /// What the person sees. The early mic of a held shortcut is unseen: idle.
+    var state: DictationState {
+        switch phase {
+        case .idle, .priming: .idle
+        case .starting: .starting
+        case .recording(_, let since): .recording(since: since)
+        case .transcribing: .transcribing
+        }
     }
+
+    /// The state with the unseen one too: idle, priming, starting, recording, transcribing.
+    var phaseName: String {
+        if case .priming = phase { "priming" } else { state.name }
+    }
+
+    var canRetry: Bool { retryable != nil }
+
+    var elapsed: TimeInterval {
+        if case .recording(_, let since) = phase { Date.now.timeIntervalSince(since) } else { 0 }
+    }
+
+    /// The one table of what each state allows.
+    func allows(_ action: DictationAction) -> Bool {
+        switch (phase, action) {
+        case (.idle, .start), (.priming, .start): true
+        case (.idle, .retry), (.priming, .retry): retryable != nil
+        case (.recording, .stop): true
+        case (.starting, .cancel), (.recording, .cancel), (.transcribing, .cancel): true
+        default: false
+        }
+    }
+
+    var allowedActions: [DictationAction] { DictationAction.allCases.filter(allows) }
 
     /// The hotkey: start when idle, stop and paste when recording. Presses
     /// while the mic opens or while transcribing are ignored.
     func toggle() async {
-        switch state {
-        case .idle:
+        switch phase {
+        case .idle, .priming:
             if !blocked() { try? await start(adoptingEarly: true) } else { await dropEarly()?.value }
         case .recording: _ = try? await stop(paste: true)
-        // A release that starts nothing must not leave its press's mic open.
-        case .starting, .transcribing: dropEarly()
+        case .starting, .transcribing: break
         }
     }
 
@@ -193,13 +279,13 @@ final class Dictation {
     /// another shortcut (⌥⌘I), `dropEarly` throws the audio away.
     func openEarly() {
         // Opening the mic deletes the kept recording, which a failed one needs for Retry.
-        guard state == .idle, early == nil, !canRetry, ready() else { return }
-        let opening = openMic()
-        early = opening
+        guard case .idle = phase, retryable != .recording, ready() else { return }
+        let mic = openMic()
+        phase = .priming(mic)
         // Held and never let go, or the release was missed: never leave the mic open unseen.
         Task { [weak self] in
             try? await Task.sleep(for: Self.earlyLimit)
-            guard let self, self.early == opening else { return }
+            guard let self, case .priming(let held) = self.phase, held === mic else { return }
             self.dropEarly()
             self.onEarlyExpired()
         }
@@ -213,114 +299,137 @@ final class Dictation {
 
     /// The early mic was not for dictating: close it and forget what it heard.
     /// At once (a press right after can open it again); the task finishes closing it.
-    /// Whatever the state: only `start` takes `early`, so its stream and buffer are still its own.
     @discardableResult
     func dropEarly() -> Task<Void, Never>? {
-        guard let early else { return nil }
-        self.early = nil
-        dropStream()
+        guard case .priming(let mic) = phase else { return nil }
+        phase = .idle
+        return close(mic)
+    }
+
+    /// Returns once the mic is live. Only the shortcut's release adopts the mic its
+    /// press opened: anything else (the CLI) would get speech from before it started.
+    func start(adoptingEarly: Bool = false) async throws {
+        guard allows(.start) else { throw DictationError.busy(state.name) }
+        var early: Mic?
+        if case .priming(let mic) = phase {
+            if adoptingEarly { early = mic } else { dropEarly() }
+        }
+        // Starting replaces the kept recording, so it cannot be retried any more.
+        retryable = nil
+        let mic = early ?? openMic()
+        update(.starting(mic, cancelRequested: false))
+        do {
+            try await mic.opening.value
+        } catch {
+            mic.stream?.cancel()
+            fail(error)
+            throw error
+        }
+        guard case .starting(let current, let cancelRequested) = phase, current === mic, !cancelRequested else {
+            mic.stream?.cancel()
+            await recorder.cancel()
+            update(.idle, notice: .canceled)
+            throw DictationError.canceled
+        }
+        update(.recording(mic, since: .now))
+        if settings.sounds { sounds.play(.start) }
+    }
+
+    /// Starts the recorder, with the stream (Whisper) or buffer (Parakeet) for its samples.
+    private func openMic() -> Mic {
+        let stream = makeStream()
+        let buffer = stream == nil && settings.model == Parakeet.model && sampler != nil ? SampleBuffer() : nil
+        // A method of the stream or buffer, not a closure written here: this file runs
+        // on the main actor, and the samples arrive on the recorder's queue.
+        let onAudio = stream?.append ?? buffer?.append
+        let url = store.recordingURL
+        let opening = Task { [recorder, canceling] in
+            await canceling?.value
+            try await recorder.start(to: url, timeout: Self.micTimeout, onAudio: onAudio)
+        }
+        return Mic(opening: opening, stream: stream, buffer: buffer)
+    }
+
+    /// Stops sending its samples anywhere and closes the recorder once it has opened.
+    private func close(_ mic: Mic) -> Task<Void, Never> {
+        mic.stream?.cancel()
         let task = Task { [recorder] in
-            _ = try? await early.value
+            _ = try? await mic.opening.value
             await recorder.cancel()
         }
         canceling = task
         return task
     }
 
-    /// Returns once the mic is live. Only the shortcut's release adopts the mic its
-    /// press opened: anything else (the CLI) would get speech from before it started.
-    func start(adoptingEarly: Bool = false) async throws {
-        guard state == .idle else { throw DictationError.busy(state.name) }
-        if !adoptingEarly { dropEarly() }
-        cancelRequested = false
-        // Starting replaces the kept recording, so it cannot be retried any more.
-        canRetry = false
-        update(.starting)
-        let opening = early ?? openMic()
-        early = nil
-        do {
-            try await opening.value
-        } catch {
-            dropStream()
-            fail(error)
-            throw error
-        }
-        if cancelRequested {
-            dropStream()
-            await recorder.cancel()
-            update(.idle, notice: .canceled)
-            throw DictationError.canceled
-        }
-        update(.recording(since: .now))
-        if settings.sounds { sounds.play(.start) }
-    }
-
-    /// Starts the recorder, with the stream (Whisper) or buffer (Parakeet) for its samples.
-    private func openMic() -> Task<Void, Error> {
-        let stream = makeStream()
-        self.stream = stream
-        let buffer = stream == nil && settings.model == Parakeet.model && sampler != nil ? SampleBuffer() : nil
-        self.buffer = buffer
-        // A method of the stream or buffer, not a closure written here: this file runs
-        // on the main actor, and the samples arrive on the recorder's queue.
-        let onAudio = stream?.append ?? buffer?.append
-        let url = store.recordingURL
-        return Task { [recorder, canceling] in
-            await canceling?.value
-            try await recorder.start(to: url, timeout: Self.micTimeout, onAudio: onAudio)
-        }
-    }
-
     /// Stops, transcribes, and saves to history. `paste` puts the text in
     /// the front app (the hotkey); the CLI only wants the text back.
     func stop(paste: Bool) async throws -> String {
-        guard case .recording = state else { throw DictationError.notRecording }
+        guard case .recording(let mic, _) = phase else { throw DictationError.notRecording }
         // The cue plays on the press: capture ends right after it.
         if settings.sounds { sounds.play(.stop) }
         let keyUp = ContinuousClock.now
         lastStreamed = false
         lastInMemory = false
-        update(.transcribing)
+        let job = Job(.recording)
+        job.stream = mic.stream
+        update(.transcribing(job))
         // After the recorder stopped: every sample is in the stream and the file is finished.
-        let recorded = await recorder.stop()
-        let stream = self.stream
-        self.stream = nil
-        let samples = buffer?.take()
-        buffer = nil
+        let stopping = Task { [recorder] in await recorder.stop() }
+        job.stopping = stopping
+        let recorded = await stopping.value
+        let samples = mic.buffer?.take()
         guard recorded >= Self.shortest else {
-            stream?.cancel()
+            mic.stream?.cancel()
+            guard isCurrent(job) else { throw DictationError.canceled }
             update(.idle, notice: .nothingHeard)
             return ""
         }
         // All of it, or the file. The recorder hands over every sample it writes, so
         // this only fails past the buffer's limit (a very long dictation).
         let whole = samples.flatMap { Double($0.count) >= recorded * Double(WAV.rate) * 0.9 ? $0 : nil }
-        return try await transcribeRecording(paste: paste, stream: stream, samples: whole, since: keyUp)
+        return try await transcribeRecording(job, paste: paste, samples: whole, since: keyUp)
     }
 
-    /// Sends the kept recording again, after a failure (network, key).
+    /// Sends the last failed recording or dropped file again.
     func retry(paste: Bool) async throws -> String {
-        guard state == .idle else { throw DictationError.busy(state.name) }
-        guard canRetry else { throw DictationError.nothingToRetry }
-        update(.transcribing)
-        return try await transcribeRecording(paste: paste, since: .now)
+        guard case .idle = state else { throw DictationError.busy(state.name) }
+        guard let retryable else { throw DictationError.nothingToRetry }
+        switch retryable {
+        case .file(let file):
+            return try await transcribeDropped(file)
+        case .recording:
+            dropEarly()
+            // A cancel during key-up: the file may still be finishing.
+            await canceling?.value
+            let job = Job(.recording)
+            update(.transcribing(job))
+            return try await transcribeRecording(job, paste: paste, since: .now)
+        }
     }
 
     /// Throws the recording away. While the mic is still opening, it stops
-    /// as soon as it opens.
-    func cancel() async {
-        switch state {
-        case .starting:
-            cancelRequested = true
-        case .recording:
+    /// as soon as it opens. While transcribing, it stops waiting: the text is
+    /// dropped and Retry sends it again. True when there was something to cancel.
+    @discardableResult
+    func cancel() async -> Bool {
+        switch phase {
+        case .starting(let mic, _):
+            phase = .starting(mic, cancelRequested: true)
+            return true
+        case .recording(let mic, _):
             // Idle first, so a press while the recorder stops cannot also stop and transcribe.
             update(.idle, notice: .canceled)
-            dropStream()
-            let task = Task { [recorder] in await recorder.cancel() }
-            canceling = task
-            await task.value
-        case .idle, .transcribing:
-            break
+            await close(mic).value
+            return true
+        case .transcribing(let job):
+            job.stream?.cancel()
+            // Canceled during key-up: the recorder is still closing the file. A start or Retry waits for it.
+            if let stopping = job.stopping { canceling = Task { _ = await stopping.value } }
+            retryable = job.source
+            update(.idle, notice: .canceled)
+            return true
+        case .idle, .priming:
+            return false
         }
     }
 
@@ -331,15 +440,22 @@ final class Dictation {
 
     /// A file dropped on the menu bar icon: transcribed, saved to history, and copied.
     func transcribeDropped(_ file: URL) async throws -> String {
-        guard state == .idle else { throw DictationError.busy(state.name) }
-        update(.transcribing)
+        guard case .idle = state else { throw DictationError.busy(state.name) }
+        // ⌥⌘ held while a file is dropped: that mic was not for this.
+        dropEarly()
+        let job = Job(.file(file))
+        update(.transcribing(job))
         let text: String
         do {
             text = try await transcriber.transcribe(file, model: settings.model, language: settings.languageCode)
         } catch {
+            guard isCurrent(job) else { throw DictationError.canceled }
+            retryable = .file(file)
             fail(error)
             throw error
         }
+        guard isCurrent(job) else { throw DictationError.canceled }
+        if retryable == .file(file) { retryable = nil }
         lastError = nil
         guard !text.isEmpty else {
             update(.idle, notice: .nothingHeard)
@@ -358,9 +474,10 @@ final class Dictation {
     }
 
     /// Puts an older transcript back on the clipboard (the menu's Recent items).
+    /// While dictating it only copies: the pill keeps showing the dictation.
     func copy(_ text: String) {
         paster.copy(text)
-        update(state, notice: .copied)
+        if state == .idle { show(.copied) }
     }
 
     /// A stream when the local model's server is ready: the language is the one chosen at the start.
@@ -372,38 +489,42 @@ final class Dictation {
         }
     }
 
-    private func dropStream() {
-        stream?.cancel()
-        stream = nil
-        buffer = nil
+    /// The job is still the one being transcribed: no cancel came since.
+    private func isCurrent(_ job: Job) -> Bool {
+        if case .transcribing(let current) = phase { current === job } else { false }
     }
 
     /// The streamed text, Parakeet's from the samples in memory, or the whole
     /// file when there was neither or they failed.
-    private func transcribeRecording(paste: Bool, stream: StreamingTranscription? = nil, samples: [Float]? = nil,
+    private func transcribeRecording(_ job: Job, paste: Bool, samples: [Float]? = nil,
                                      since start: ContinuousClock.Instant) async throws -> String {
         let text: String
+        // Kept here until it is known this job was not canceled: a late one must not change the next one's numbers.
+        var streamed = false, inMemory = false
         do {
-            lastStreamed = false
-            lastInMemory = false
             let language = settings.languageCode
-            if let stream, let streamed = try? await stream.finish() {
-                text = streamed
-                lastStreamed = true
-            } else if settings.model == Parakeet.model, let samples, let sampler,
+            if let stream = job.stream, let fromStream = try? await stream.finish() {
+                text = fromStream
+                streamed = true
+            } else if settings.model == Parakeet.model, let samples, let sampler, isCurrent(job),
                       let heard = try? await sampler.transcribe(samples: samples, language: language) {
                 text = heard
-                lastInMemory = true
+                inMemory = true
             } else {
+                guard isCurrent(job) else { throw DictationError.canceled }
                 text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
             }
-            lastLatency = start.duration(to: .now)
         } catch {
-            canRetry = FileManager.default.fileExists(atPath: store.recordingURL.path)
+            guard isCurrent(job) else { throw DictationError.canceled }
+            retryable = FileManager.default.fileExists(atPath: store.recordingURL.path) ? .recording : nil
             fail(error)
             throw error
         }
-        canRetry = false
+        guard isCurrent(job) else { throw DictationError.canceled }
+        lastLatency = start.duration(to: .now)
+        lastStreamed = streamed
+        lastInMemory = inMemory
+        retryable = nil
         lastError = nil
         guard !text.isEmpty else {
             update(.idle, notice: .nothingHeard)
@@ -437,11 +558,18 @@ final class Dictation {
     }
 
     /// One place that changes what the person sees, then redraws once.
-    private func update(_ state: DictationState, notice: Notice? = nil) {
-        self.state = state
+    private func update(_ phase: Phase, notice: Notice? = nil) {
+        self.phase = phase
+        show(notice)
+    }
+
+    /// A notice is the result of a dictation: it shows only once back to ready, never over a live one.
+    private func show(_ notice: Notice?) {
         noticeTask?.cancel()
+        let notice = state == .idle ? notice : nil
         self.notice = notice
         if let notice {
+            lastOutcome = notice
             noticeTask = Task { [weak self] in
                 try? await Task.sleep(for: notice.duration)
                 guard !Task.isCancelled, let self else { return }

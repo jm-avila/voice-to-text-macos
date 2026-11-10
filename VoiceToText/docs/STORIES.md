@@ -161,3 +161,13 @@ Acceptance:
 - [snap] The pill shows "Speak now" in red for the first 1.5 s of recording, then the shortcut to stop.
 - [manual] Press ⌥⌘ and start talking at once: the first word is in the text. ⌥⌘I in Safari still opens the inspector.
 Status: done
+
+### S-019 One state to trust
+As the user, the pill and menu never contradict what is happening, I can stop a long wait, and Retry resends what actually failed. As an agent, `vtt status` tells me what I can do now.
+Screens: HUD (hud-loading), Settings (settings-failed)
+Acceptance:
+- [unit] Each local model reports off, loading, ready, or failed with the reason; a canceled dictation leaves Whisper's server loaded; the modifier tap is waiting, pressed, or spoiled.
+- [self] `vtt status` lists `actions` for idle, recording and transcribing, and `phase` priming while ⌥⌘ is held; copying a Recent item while recording keeps the recording on the pill; cancel while transcribing stops waiting, drops the late text, and `vtt retry` sends it again; a failed dropped file is what Retry resends; while Parakeet loads the menu says so and offers Cancel; a model that did not load says why in status.
+- [snap] The pill says "Loading Parakeet…"; Settings shows "Did not load" with Try Again and the reason in the footer.
+- [manual] Pick Whisper: `vtt status` goes loading → ready; pick Parakeet with no network the first time: Settings says Did not load, Try Again loads it.
+Status: done

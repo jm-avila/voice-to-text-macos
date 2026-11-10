@@ -70,6 +70,19 @@ enum Snapshot {
                     await stopping.value
                     await pause(0.2)
                     shoot("hud-pasted", mode)
+                    // Waiting for Parakeet to load instead of transcribing.
+                    let model = dictation.settings.model
+                    dictation.settings.model = Parakeet.model
+                    services.permissions.parakeet = .loading
+                    recorder.startDelay = .milliseconds(50)
+                    try? await dictation.start()
+                    let waiting = Task { _ = try? await dictation.stop(paste: true) }
+                    await pause(0.5)
+                    shoot("hud-loading", mode)
+                    await dictation.cancel()
+                    await waiting.value
+                    services.permissions.parakeet = .off
+                    dictation.settings.model = model
                     // Copied only (no Accessibility), then an API error.
                     recorder.startDelay = .milliseconds(50)
                     transcriber.delay = .milliseconds(50)
@@ -94,6 +107,11 @@ enum Snapshot {
                     services.settingsWindow.show()
                     await pause(1)
                     capture(to: "\(dir)/settings-\(mode).png", window: services.settingsWindow.nsWindow)
+                    // A model that did not load: why, and Try Again.
+                    services.permissions.parakeet = .failed("Parakeet: The Internet connection appears to be offline.")
+                    await pause(0.5)
+                    capture(to: "\(dir)/settings-failed-\(mode).png", window: services.settingsWindow.nsWindow)
+                    services.permissions.parakeet = .off
                     // S-011: a changed shortcut (Reset shows), then recording one after a refused ⇧D.
                     let custom = Shortcut(keyCode: 2, modifiers: Shortcut.option | Shortcut.command, key: "D")
                     _ = services.hotkeys.change(to: custom)

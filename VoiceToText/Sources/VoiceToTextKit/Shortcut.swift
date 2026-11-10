@@ -82,8 +82,15 @@ public struct ModifierTap: Sendable {
 
     public let modifiers: UInt32
     private var held: UInt32 = 0
-    private var reached = false
-    private var spoiled = false
+    private enum Phase {
+        /// No tap yet: nothing held, or not exactly the shortcut's modifiers so far.
+        case waiting
+        /// Exactly the shortcut's modifiers, nothing else since.
+        case pressed
+        /// A key, click, or extra modifier: nothing fires until all are let go.
+        case spoiled
+    }
+    private var phase = Phase.waiting
 
     public init(_ modifiers: UInt32) { self.modifiers = modifiers }
 
@@ -91,12 +98,12 @@ public struct ModifierTap: Sendable {
     public mutating func changed(to now: UInt32) -> Event? {
         held = now
         if now == 0 {
-            defer { reached = false; spoiled = false }
-            return reached && !spoiled ? .released : nil
+            defer { phase = .waiting }
+            return phase == .pressed ? .released : nil
         }
         if now & ~modifiers != 0 { return spoil() }
-        if now == modifiers, !reached, !spoiled {
-            reached = true
+        if now == modifiers, phase == .waiting {
+            phase = .pressed
             return .pressed
         }
         return nil
@@ -108,7 +115,7 @@ public struct ModifierTap: Sendable {
     }
 
     private mutating func spoil() -> Event? {
-        defer { spoiled = true }
-        return reached && !spoiled ? .spoiled : nil
+        defer { phase = .spoiled }
+        return phase == .pressed ? .spoiled : nil
     }
 }

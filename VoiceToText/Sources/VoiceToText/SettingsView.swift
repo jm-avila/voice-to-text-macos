@@ -30,7 +30,8 @@ final class SettingsWindow {
     private func make() -> NSWindow {
         let services = services()
         let root = SettingsView(dictation: services.dictation, permissions: services.permissions,
-                                hotkeys: services.hotkeys, recorder: services.shortcutRecorder, login: services.loginItem)
+                                hotkeys: services.hotkeys, recorder: services.shortcutRecorder, login: services.loginItem,
+                                reloadModel: { services.syncServer() })
             .themed()
             .noInitialFocus()
         let controller = NSHostingController(rootView: root)
@@ -78,6 +79,8 @@ struct SettingsView: View {
     let hotkeys: HotkeyCenter
     let recorder: ShortcutRecorder
     let login: LoginItem
+    /// Loads the selected local model again, after it failed.
+    let reloadModel: () -> Void
     /// Looked up when the window opens: it asks Keychain through /usr/bin/security.
     @ViewState private var keyFound: Bool?
 
@@ -166,16 +169,23 @@ struct SettingsView: View {
                     }
                 }
                 LabeledContent("Whisper (local)") {
-                    switch permissions.localModel {
-                    case .ready: Status(ok: true, text: "Downloaded")
-                    case .noModel: Status(ok: false, text: "Not downloaded")
-                    case .noCLI: Status(ok: false, text: "Needs whisper.cpp")
+                    switch (permissions.localModel, permissions.whisper) {
+                    case (_, .loading): Loading(text: "Loading…")
+                    case (_, .failed(let reason)): Failed(reason: reason, retry: reloadModel)
+                    case (.ready, .ready): Status(ok: true, text: "Loaded")
+                    case (.ready, _): Status(ok: true, text: "Downloaded")
+                    case (.noModel, _): Status(ok: false, text: "Not downloaded")
+                    case (.noCLI, _): Status(ok: false, text: "Needs whisper.cpp")
                     }
                 }
                 LabeledContent("Parakeet (local)") {
-                    switch permissions.parakeetModel {
-                    case .ready: Status(ok: true, text: "Downloaded")
-                    case .noModel: Status(ok: false, text: "Not downloaded")
+                    switch (permissions.parakeetModel, permissions.parakeet) {
+                    case (.ready, .loading): Loading(text: "Loading…")
+                    case (.noModel, .loading): Loading(text: "Downloading 610 MB…")
+                    case (_, .failed(let reason)): Failed(reason: reason, retry: reloadModel)
+                    case (.ready, .ready): Status(ok: true, text: "Loaded")
+                    case (.ready, _): Status(ok: true, text: "Downloaded")
+                    case (.noModel, _): Status(ok: false, text: "Not downloaded")
                     }
                 }
                 // Missing ones are at the top, with their button.
@@ -213,6 +223,10 @@ struct SettingsView: View {
     /// The one hint that matters most for the model in use.
     private var footer: String {
         let local = dictation.settings.model == LocalWhisper.model
+        if let reason = (local ? permissions.whisper : dictation.settings.model == Parakeet.model ? permissions.parakeet : .off).error {
+            // The reason names the model: "Parakeet: The Internet connection appears to be offline."
+            return "\(reason.trimmingCharacters(in: CharacterSet(charactersIn: "."))). Try Again loads it again."
+        }
         if local, permissions.localModel != .ready {
             return "For the local model, run VoiceToText/tools/get-model.sh (whisper.cpp and 1.6 GB of model)."
         }
@@ -226,6 +240,31 @@ struct SettingsView: View {
 
     static func languageName(_ code: String) -> String {
         code.isEmpty ? "Detect automatically" : Locale.current.localizedString(forLanguageCode: code)?.capitalized ?? code
+    }
+}
+
+/// A model loading: a small spinner and what it is doing.
+private struct Loading: View {
+    var text: String
+
+    var body: some View {
+        HStack(spacing: Space.sm) {
+            ProgressView().controlSize(.small)
+            Text(text).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// A model that did not load, why (on hover and in the footer), and a button to load it again.
+private struct Failed: View {
+    var reason: String
+    var retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: Space.sm) {
+            Status(ok: false, text: "Did not load").help(reason)
+            Button("Try Again", action: retry)
+        }
     }
 }
 
