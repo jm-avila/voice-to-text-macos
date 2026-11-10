@@ -224,7 +224,8 @@ struct SettingsView: View {
     private var footer: String {
         let local = dictation.settings.model == LocalWhisper.model
         if let reason = (local ? permissions.whisper : dictation.settings.model == Parakeet.model ? permissions.parakeet : .off).error {
-            return "The model did not load: \(reason). Try Again loads it again."
+            // The reason names the model: "Parakeet: The Internet connection appears to be offline."
+            return "\(reason.trimmingCharacters(in: CharacterSet(charactersIn: "."))). Try Again loads it again."
         }
         if local, permissions.localModel != .ready {
             return "For the local model, run VoiceToText/tools/get-model.sh (whisper.cpp and 1.6 GB of model)."

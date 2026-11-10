@@ -18,7 +18,8 @@ rebuild resets the Microphone and Accessibility grants.
 
 | Part | File | Role |
 |---|---|---|
-| State machine | `Sources/VoiceToText/Dictation.swift` | idle → starting → recording → transcribing. Hotkey, menu and CLI all go through it. |
+| State machine | `Sources/VoiceToText/Dictation.swift` | idle → (priming) → starting → recording → transcribing. One private `Phase` enum holds each state's data (the mic, its stream or buffer, the transcription job); `allows(_:)` is the one table of what each state permits, and `vtt status` lists it as `actions`. Hotkey, menu and CLI all go through it. |
+| Model residency | `Sources/VoiceToTextKit/ModelResidency.swift` | off / loading / ready / failed(reason), shared by `WhisperServer` and `ParakeetTranscriber`. Settings, the pill, and `vtt status` (`models`) show it. |
 | Microphone | `Recorder.swift` | `AVAudioRecorder` behind `AudioRecording`. "Live" once `currentTime > 0`. |
 | Transcription | `Sources/VoiceToTextKit/Transcription.swift`, `LocalWhisper.swift` | `Transcribing` protocol. `RoutingTranscriber` picks `OpenAITranscriber` or `LocalWhisperTranscriber` by model id. |
 | Local model | `LocalWhisper.swift` | `afconvert` → 16 kHz WAV, then `whisper-cli --vad`. Drops segments that are only a noise tag; treats `error:` on stderr as a failure (whisper-cli exits 0 on some errors). |
@@ -33,7 +34,8 @@ is a protocol, so the self-test runs with fakes.
 ## For agents: `vtt`
 
 ```sh
-vtt status --json                         # state, settings, key/mic/Accessibility, history count
+vtt status --json                         # state, phase, actions (what works now), models, retry, settings, key/mic/Accessibility
+vtt retry --json                          # the last failed or canceled recording (or dropped file) again
 vtt transcribe ~/Desktop/memo.m4a --json  # any audio file, not saved to history
 vtt start && sleep 5 && vtt stop --json   # record from the mic, print the text, save to history
 vtt history list --limit 3 --json

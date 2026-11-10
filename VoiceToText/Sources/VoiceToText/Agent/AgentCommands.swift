@@ -126,8 +126,9 @@ extension Services {
             "parakeetModel": Parakeet.status.rawValue,
             "parakeetLoaded": parakeet?.isLoaded ?? false,
             "models": [
-                LocalWhisper.model: Self.model(installed: LocalWhisper.status.rawValue, permissions.whisper),
-                Parakeet.model: Self.model(installed: Parakeet.status.rawValue, permissions.parakeet),
+                // The models themselves when they exist (live, not the last poll); the fakes' values otherwise.
+                LocalWhisper.model: Self.model(installed: LocalWhisper.status.rawValue, server?.residency ?? permissions.whisper),
+                Parakeet.model: Self.model(installed: Parakeet.status.rawValue, parakeet?.residency ?? permissions.parakeet),
             ],
         ]
         switch dictation.retryable {

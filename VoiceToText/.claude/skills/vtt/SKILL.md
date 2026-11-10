@@ -23,11 +23,12 @@ If the app is closed, the command opens it in the background.
 
 | Command | Does |
 | --- | --- |
-| `vtt status --json` | state (idle, starting, recording, transcribing), model, language, key/mic/Accessibility, history count, last error |
+| `vtt status --json` | state (idle, starting, recording, transcribing), `phase` (also `priming`: ⌥⌘ held, mic opening unseen), `actions` (the commands that work right now: check it instead of guessing), `models` (each local model's `installed`, `residency` off/loading/ready/failed, and `error`), `retry` (what `vtt retry` would send), `waiting` (a dictation waiting for its model), `lastOutcome`, model, language, key/mic/Accessibility, history count, last error |
 | `vtt transcribe <file> --json` | `{"text": ...}` for an m4a, mp3, wav, … with the current model and language. Not saved |
 | `vtt start --json` | Opens the mic and returns once it is live: speech before that is lost |
 | `vtt stop --json` | Stops, transcribes, saves to history: `{"text", "saved", "streamed", "inMemory", "latencyMs"}` (key-up to text; `streamed`: local Whisper transcribed it while it was spoken; `inMemory`: Parakeet took the samples from memory, not the file). `--paste` also pastes into the front app |
-| `vtt cancel --json` | Stops recording and throws the audio away |
+| `vtt cancel --json` | Stops recording and throws the audio away. While transcribing it stops waiting and keeps the recording for `retry` |
+| `vtt retry --json` | Sends the last failed or canceled recording (or dropped file) again and prints the text. `--paste` pastes a recording |
 | `vtt history list --limit N --json` | Past transcripts, newest first: `{"entries": [{date, text}], "total", "file"}` |
 | `vtt settings update [--model M] [--language es\|auto] [--sounds true\|false] --json` | Only the options given change |
 

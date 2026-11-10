@@ -62,7 +62,7 @@ nonisolated enum DictationError: LocalizedError {
         switch self {
         case .busy(let state): state == "recording" ? "already recording" : "busy: \(state)"
         case .notRecording: "not recording"
-        case .nothingToRetry: "there is no failed recording to retry"
+        case .nothingToRetry: "there is no failed recording or file to retry"
         case .canceled: "canceled"
         }
     }
