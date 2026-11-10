@@ -143,6 +143,8 @@ private final class Job {
     /// What Retry sends again if it fails or is canceled.
     let source: Retryable
     var stream: StreamingTranscription?
+    /// The recorder finishing the file at key-up. A cancel makes the next start (and Retry) wait for it.
+    var stopping: Task<TimeInterval, Never>?
 
     init(_ source: Retryable) { self.source = source }
 }
@@ -277,7 +279,7 @@ final class Dictation {
     /// another shortcut (⌥⌘I), `dropEarly` throws the audio away.
     func openEarly() {
         // Opening the mic deletes the kept recording, which a failed one needs for Retry.
-        guard case .idle = phase, retryable == nil, ready() else { return }
+        guard case .idle = phase, retryable != .recording, ready() else { return }
         let mic = openMic()
         phase = .priming(mic)
         // Held and never let go, or the release was missed: never leave the mic open unseen.
@@ -372,7 +374,9 @@ final class Dictation {
         job.stream = mic.stream
         update(.transcribing(job))
         // After the recorder stopped: every sample is in the stream and the file is finished.
-        let recorded = await recorder.stop()
+        let stopping = Task { [recorder] in await recorder.stop() }
+        job.stopping = stopping
+        let recorded = await stopping.value
         let samples = mic.buffer?.take()
         guard recorded >= Self.shortest else {
             mic.stream?.cancel()
@@ -395,6 +399,8 @@ final class Dictation {
             return try await transcribeDropped(file)
         case .recording:
             dropEarly()
+            // A cancel during key-up: the file may still be finishing.
+            await canceling?.value
             let job = Job(.recording)
             update(.transcribing(job))
             return try await transcribeRecording(job, paste: paste, since: .now)
@@ -417,6 +423,8 @@ final class Dictation {
             return true
         case .transcribing(let job):
             job.stream?.cancel()
+            // Canceled during key-up: the recorder is still closing the file. A start or Retry waits for it.
+            if let stopping = job.stopping { canceling = Task { _ = await stopping.value } }
             retryable = job.source
             update(.idle, notice: .canceled)
             return true
@@ -491,22 +499,21 @@ final class Dictation {
     private func transcribeRecording(_ job: Job, paste: Bool, samples: [Float]? = nil,
                                      since start: ContinuousClock.Instant) async throws -> String {
         let text: String
+        // Kept here until it is known this job was not canceled: a late one must not change the next one's numbers.
+        var streamed = false, inMemory = false
         do {
-            lastStreamed = false
-            lastInMemory = false
             let language = settings.languageCode
-            if let stream = job.stream, let streamed = try? await stream.finish() {
-                text = streamed
-                lastStreamed = true
+            if let stream = job.stream, let fromStream = try? await stream.finish() {
+                text = fromStream
+                streamed = true
             } else if settings.model == Parakeet.model, let samples, let sampler, isCurrent(job),
                       let heard = try? await sampler.transcribe(samples: samples, language: language) {
                 text = heard
-                lastInMemory = true
+                inMemory = true
             } else {
                 guard isCurrent(job) else { throw DictationError.canceled }
                 text = try await transcriber.transcribe(store.recordingURL, model: settings.model, language: settings.languageCode)
             }
-            lastLatency = start.duration(to: .now)
         } catch {
             guard isCurrent(job) else { throw DictationError.canceled }
             retryable = FileManager.default.fileExists(atPath: store.recordingURL.path) ? .recording : nil
@@ -514,6 +521,9 @@ final class Dictation {
             throw error
         }
         guard isCurrent(job) else { throw DictationError.canceled }
+        lastLatency = start.duration(to: .now)
+        lastStreamed = streamed
+        lastInMemory = inMemory
         retryable = nil
         lastError = nil
         guard !text.isEmpty else {

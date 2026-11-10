@@ -38,6 +38,8 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         /// Only a server this app started. One it found running is left alone.
         var process: Process?
         var phase = Phase.off
+        /// Counts launches: an older one that resumes after a stop and a new start must not run a second server.
+        var launch = 0
     }
     private let state = Mutex(State())
 
@@ -88,7 +90,9 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
             case .ready: return nil
             case .loading(let task): return task
             case .off, .failed:
-                let task = Task { await self.launch() }
+                state.launch += 1
+                let launch = state.launch
+                let task = Task { await self.launch(launch) }
                 state.phase = .loading(task)
                 return task
             }
@@ -113,7 +117,7 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
     }
 
     /// nil once it answers, else why it could not be loaded.
-    private func launch() async -> String? {
+    private func launch(_ launch: Int) async -> String? {
         if await answers() { return nil }
         guard let executable = executable() else { return "whisper-server is not installed (brew install whisper-cpp)" }
         guard [modelURL, vadURL].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
@@ -128,7 +132,7 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         process.standardError = FileHandle.nullDevice
         // Under the lock: a stop that came first wins, and one that comes later finds the process.
         let launched = state.withLock { state -> String? in
-            guard case .loading = state.phase else { return "stopped" }
+            guard case .loading = state.phase, state.launch == launch else { return "stopped" }
             guard (try? process.run()) != nil else { return "whisper-server could not start" }
             state.process = process
             return nil
@@ -147,6 +151,12 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         }
         process.terminate()
         return reason
+    }
+
+    /// After it stopped answering, unless another model was picked meanwhile (a stop makes it off).
+    private func restartIfWanted() async {
+        guard state.withLock({ if case .failed = $0.phase { true } else { false } }) else { return }
+        await start()
     }
 
     /// Any HTTP answer: whisper-server listens only once the model is loaded.
@@ -178,7 +188,7 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
                 state.phase = .failed("whisper-server stopped answering: \(error.localizedDescription)")
                 return true
             }
-            if restart { Task { await start() } }
+            if restart { Task { await restartIfWanted() } }
             throw TranscriptionError.local("whisper-server: \(error.localizedDescription)")
         }
         return try WhisperServerRequest.interpret(status: (response as? HTTPURLResponse)?.statusCode ?? 0, body: data)
