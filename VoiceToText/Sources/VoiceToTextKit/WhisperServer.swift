@@ -26,13 +26,18 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
     let vadURL: URL
     let executable: @Sendable () -> URL?
 
+    private enum Phase {
+        /// Not selected. A start finishing after a stop must not keep it running.
+        case off
+        /// Starting it, or waiting for one to answer. A second start joins this one.
+        case loading(Task<String?, Never>)
+        case ready
+        case failed(String)
+    }
     private struct State {
         /// Only a server this app started. One it found running is left alone.
         var process: Process?
-        var ready = false
-        var starting: Task<Bool, Never>?
-        /// The local model is selected. A start finishing after a stop must not keep it running.
-        var wanted = false
+        var phase = Phase.off
     }
     private let state = Mutex(State())
 
@@ -54,7 +59,18 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         ["-m", model.path, "--vad", "-vm", vad.path, "-nt", "-l", "auto", "--host", "127.0.0.1", "--port", String(port)]
     }
 
-    public var isReady: Bool { state.withLock { $0.ready } }
+    public var isReady: Bool { residency == .ready }
+
+    public var residency: ModelResidency {
+        state.withLock { state in
+            switch state.phase {
+            case .off: .off
+            case .loading: .loading
+            case .ready: .ready
+            case .failed(let reason): .failed(reason)
+            }
+        }
+    }
 
     /// Starts it unless one already answers. True once it answers (the model is loaded).
     /// Starts whisper-server under a shell that stops it when this app (`pid`) is gone.
@@ -67,35 +83,42 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
 
     @discardableResult
     public func start() async -> Bool {
-        let task = state.withLock { state in
-            state.wanted = true
-            if let starting = state.starting { return starting }
-            let starting = Task { await self.launch() }
-            state.starting = starting
-            return starting
+        let task = state.withLock { state -> Task<String?, Never>? in
+            switch state.phase {
+            case .ready: return nil
+            case .loading(let task): return task
+            case .off, .failed:
+                let task = Task { await self.launch() }
+                state.phase = .loading(task)
+                return task
+            }
         }
-        let ready = await task.value
+        guard let task else { return true }
+        let failure = await task.value
         return state.withLock { state in
-            state.starting = nil
-            state.ready = ready && state.wanted
-            return state.ready
+            // A stop, or another start after it, came first: that one decides.
+            guard case .loading(let current) = state.phase, current == task else { return false }
+            state.phase = failure.map(Phase.failed) ?? .ready
+            return failure == nil
         }
     }
 
     /// Stops the server this app started and frees its memory. Safe to call from any thread.
     public func stop() {
         state.withLock { state in
-            state.wanted = false
+            state.phase = .off
             state.process?.terminate()
             state.process = nil
-            state.ready = false
         }
     }
 
-    private func launch() async -> Bool {
-        if await answers() { return true }
-        guard let executable = executable(),
-              [modelURL, vadURL].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else { return false }
+    /// nil once it answers, else why it could not be loaded.
+    private func launch() async -> String? {
+        if await answers() { return nil }
+        guard let executable = executable() else { return "whisper-server is not installed (brew install whisper-cpp)" }
+        guard [modelURL, vadURL].allSatisfy({ FileManager.default.fileExists(atPath: $0.path) }) else {
+            return "the model is not downloaded (tools/get-model.sh)"
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", Self.watchdog, "whisper-server", executable.path]
@@ -104,24 +127,26 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         // Under the lock: a stop that came first wins, and one that comes later finds the process.
-        let launched = state.withLock { state in
-            guard state.wanted, (try? process.run()) != nil else { return false }
+        let launched = state.withLock { state -> String? in
+            guard case .loading = state.phase else { return "stopped" }
+            guard (try? process.run()) != nil else { return "whisper-server could not start" }
             state.process = process
-            return true
+            return nil
         }
-        guard launched else { return false }
+        if let launched { return launched }
         // Loading the model takes about a second; a cold disk, longer.
         let deadline = ContinuousClock.now + .seconds(30)
         while ContinuousClock.now < deadline, process.isRunning {
-            if await answers() { return true }
+            if await answers() { return nil }
             try? await Task.sleep(for: .milliseconds(150))
         }
+        let reason = process.isRunning ? "whisper-server took over 30 s to load the model" : "whisper-server quit while loading the model"
         // Too slow: stop it rather than keep a copy loading next to whisper-cli's.
         state.withLock { state in
             if state.process === process { state.process = nil }
         }
         process.terminate()
-        return false
+        return reason
     }
 
     /// Any HTTP answer: whisper-server listens only once the model is loaded.
@@ -145,10 +170,13 @@ public final class WhisperServer: ChunkTranscribing, Sendable {
         do {
             (data, response) = try await session.upload(for: request, from: form.body(wav: wav))
         } catch {
+            // A canceled dictation says nothing about the server: it stays loaded.
+            if Task.isCancelled || (error as? URLError)?.code == .cancelled || error is CancellationError { throw error }
             // Gone (crashed, killed): whisper-cli takes over until it answers again.
             let restart = state.withLock { state in
-                state.ready = false
-                return state.wanted && !Task.isCancelled
+                guard case .ready = state.phase else { return false }
+                state.phase = .failed("whisper-server stopped answering: \(error.localizedDescription)")
+                return true
             }
             if restart { Task { await start() } }
             throw TranscriptionError.local("whisper-server: \(error.localizedDescription)")

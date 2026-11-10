@@ -22,7 +22,7 @@ struct ParakeetTests {
         await #expect(throws: TranscriptionError.emptyRecording) {
             try await parakeet.transcribe(file, model: Parakeet.model, language: "es")
         }
-        #expect(!parakeet.isLoaded && !parakeet.isLoading)
+        #expect(!parakeet.isLoaded && !parakeet.isLoading && parakeet.residency == .off)
     }
 
     @Test("The buffer keeps samples in order from any thread and empties when taken")
@@ -56,6 +56,7 @@ struct ParakeetTests {
     func real() async throws {
         let parakeet = ParakeetTranscriber()
         try await parakeet.load()   // what picking it in Settings does
+        #expect(parakeet.residency == .ready)
         for (voice, text, language, expected) in [
             // Not Mónica: through Process the accented name picks a voice that is not Spanish.
             ("Paulina", "Hola, esto es una prueba de dictado.", "es", "Hola, esto es una prueba de dictado."),
@@ -83,7 +84,7 @@ struct ParakeetTests {
         #expect(try await running.value.contains("mercado"))
         // A transcription after the switch does not keep the model loaded.
         #expect(try await parakeet.transcribe(file, model: Parakeet.model, language: "es").contains("mercado"))
-        #expect(!parakeet.isLoaded)
+        #expect(!parakeet.isLoaded && parakeet.residency == .off)
     }
 
     static func say(_ voice: String, _ text: String) throws -> URL {

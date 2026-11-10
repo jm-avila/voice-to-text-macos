@@ -255,6 +255,42 @@ struct ResidentModel {
         #expect(await started.value == false && !server.isReady)
     }
 
+    @Test("A canceled dictation leaves the server loaded: the next one still streams")
+    func cancelKeepsItLoaded() async {
+        ServerStub.down = false
+        let server = WhisperServer(session: ServerStub.session, executable: { nil })
+        await server.start()
+        let piece = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await server.transcribe(wav: WAV.data(Audio.speech(1)), language: "es", prompt: nil)
+        }
+        _ = try? await piece.value
+        #expect(server.isReady && server.residency == .ready)
+    }
+
+    @Test("Its residency: loaded, failed with the reason, or off after a stop")
+    func residency() async {
+        ServerStub.down = false
+        let found = WhisperServer(session: ServerStub.session, executable: { nil })
+        #expect(found.residency == .off)
+        await found.start()
+        #expect(found.residency == .ready)
+        found.stop()
+        #expect(found.residency == .off)
+        ServerStub.down = true
+        defer { ServerStub.down = false }
+        let none = WhisperServer(session: ServerStub.session, executable: { nil })
+        await none.start()
+        #expect(none.residency == .failed("whisper-server is not installed (brew install whisper-cpp)"))
+        // A request to a server that went away: not loaded any more, and it says why.
+        ServerStub.down = false
+        await found.start()
+        ServerStub.down = true
+        _ = try? await found.transcribe(wav: WAV.data(Audio.speech(1)), language: "es", prompt: nil)
+        #expect(!found.isReady)
+        if case .ready = found.residency { Issue.record("still ready after the server went away") }
+    }
+
     @Test("Whole files go to the server when it is ready, else to whisper-cli; a failure falls back")
     func routing() async throws {
         let file = FileManager.default.temporaryDirectory.appending(path: "vtt-server-\(UUID()).wav")

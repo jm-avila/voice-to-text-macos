@@ -38,60 +38,78 @@ public protocol SampleTranscribing: Sendable {
 }
 
 public final class ParakeetTranscriber: Transcribing, SampleTranscribing, Sendable {
-    private struct State {
-        var manager: AsrManager?
+    private enum Phase {
+        case off
         /// Runs to the end once started (a download can't be stopped halfway), so a
-        /// pick, a switch away, and a pick again share one download.
-        var loading: Task<AsrManager, Error>?
-        /// Parakeet is selected. A load that finishes when it is not keeps nothing.
-        var wanted = false
+        /// pick, a switch away, and a pick again share one download. `kept`: Parakeet
+        /// is selected; a load that finishes when it is not keeps nothing.
+        case loading(Task<AsrManager, Error>, kept: Bool)
+        case ready(AsrManager)
+        case failed(String)
     }
-    private let state = Mutex(State())
+    private let state = Mutex(Phase.off)
 
     public init() {}
 
-    public var isLoaded: Bool { state.withLock { $0.manager != nil } }
-    public var isLoading: Bool { state.withLock { $0.loading != nil } }
+    public var isLoaded: Bool { residency == .ready }
+    public var isLoading: Bool { residency == .loading }
+
+    public var residency: ModelResidency {
+        state.withLock { phase in
+            switch phase {
+            case .off: .off
+            case .loading: .loading
+            case .ready: .ready
+            case .failed(let reason): .failed(reason)
+            }
+        }
+    }
 
     /// Loads (and the first time downloads) the model. Safe to call again while it loads.
     /// `keep` is for picking the model; a transcription joins the load without keeping
     /// it, so one that ends after the person switched away does not hold 600 MB.
     @discardableResult
     public func load(keep: Bool = true) async throws -> AsrManager {
-        let task = state.withLock { state -> Task<AsrManager, Error> in
-            if keep { state.wanted = true }
-            if let manager = state.manager { return Task { manager } }
-            if let loading = state.loading { return loading }
-            let loading = Task {
-                let models = try await AsrModels.downloadAndLoad(version: Parakeet.version)
-                let manager = AsrManager(config: .default)
-                try await manager.loadModels(models)
-                return manager
+        let task = state.withLock { phase -> Task<AsrManager, Error> in
+            switch phase {
+            case .ready(let manager):
+                return Task { manager }
+            case .loading(let loading, let kept):
+                phase = .loading(loading, kept: kept || keep)
+                return loading
+            case .off, .failed:
+                let loading = Task {
+                    let models = try await AsrModels.downloadAndLoad(version: Parakeet.version)
+                    let manager = AsrManager(config: .default)
+                    try await manager.loadModels(models)
+                    return manager
+                }
+                // A failed one was selected: loading it again for a dictation keeps it.
+                if case .failed = phase { phase = .loading(loading, kept: true) } else { phase = .loading(loading, kept: keep) }
+                return loading
             }
-            state.loading = loading
-            return loading
         }
         do {
             let manager = try await task.value
-            state.withLock { state in
-                if state.loading == task { state.loading = nil }
-                if state.wanted, state.manager == nil { state.manager = manager }
+            state.withLock { phase in
+                if case .loading(let current, let kept) = phase, current == task { phase = kept ? .ready(manager) : .off }
             }
             return manager
         } catch {
-            state.withLock { state in
-                if state.loading == task { state.loading = nil }
+            let message = "Parakeet: \(error.localizedDescription)"
+            state.withLock { phase in
+                if case .loading(let current, let kept) = phase, current == task { phase = kept ? .failed(message) : .off }
             }
-            throw TranscriptionError.local("Parakeet: \(error.localizedDescription)")
+            throw TranscriptionError.local(message)
         }
     }
 
     /// Frees the model's memory once no transcription holds it (it is not
     /// cleaned up under a running one). A load still running finishes but is dropped.
     public func unload() {
-        state.withLock { state in
-            state.wanted = false
-            state.manager = nil
+        state.withLock { phase in
+            // A load still running finishes, shared by a pick again, but keeps nothing.
+            if case .loading(let loading, _) = phase { phase = .loading(loading, kept: false) } else { phase = .off }
         }
     }
 
